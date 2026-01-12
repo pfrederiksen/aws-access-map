@@ -41,7 +41,7 @@ func TestPrintWhoCan_JSON(t *testing.T) {
 	w.Close()
 	os.Stdout = old
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r) // Ignore error in test
 
 	// Parse JSON to verify it's valid
 	var output WhoCanOutput
@@ -94,7 +94,7 @@ func TestPrintWhoCan_Text(t *testing.T) {
 	w.Close()
 	os.Stdout = old
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r) // Ignore error in test
 
 	if buf.Len() == 0 {
 		t.Error("Expected non-empty text output")
@@ -121,7 +121,7 @@ func TestPrintWhoCan_EmptyPrincipals(t *testing.T) {
 	w.Close()
 	os.Stdout = old
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r) // Ignore error in test
 
 	if !bytes.Contains(buf.Bytes(), []byte("No principals found")) {
 		t.Error("Expected 'No principals found' message")
@@ -171,7 +171,7 @@ func TestPrintPaths_JSON(t *testing.T) {
 	w.Close()
 	os.Stdout = old
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r) // Ignore error in test
 
 	// Parse JSON to verify it's valid
 	var output PathsOutput
@@ -226,7 +226,7 @@ func TestPrintReport_JSON(t *testing.T) {
 	w.Close()
 	os.Stdout = old
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r) // Ignore error in test
 
 	// Parse JSON to verify it's valid
 	var output ReportOutput
@@ -271,7 +271,7 @@ func TestPrintReport_NoFindings(t *testing.T) {
 	w.Close()
 	os.Stdout = old
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r) // Ignore error in test
 
 	if !bytes.Contains(buf.Bytes(), []byte("No high-risk findings")) {
 		t.Error("Expected 'No high-risk findings' message")
