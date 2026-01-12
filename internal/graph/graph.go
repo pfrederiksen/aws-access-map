@@ -201,6 +201,51 @@ func (g *Graph) GetTrustedPrincipals(roleARN string) []string {
 	return g.trustRelations[roleARN]
 }
 
+// GetRolesCanAssume returns all roles that a principal can assume
+// This is the inverse of GetTrustedPrincipals - it looks up which roles
+// have trust policies that allow the given principal
+func (g *Graph) GetRolesCanAssume(principalARN string) []*types.Principal {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	var roles []*types.Principal
+
+	// Iterate through all trust relationships to find roles that trust this principal
+	for roleARN, trustedPrincipals := range g.trustRelations {
+		for _, trusted := range trustedPrincipals {
+			// Check if this principal is explicitly trusted or if wildcard trust exists
+			if trusted == principalARN || trusted == "*" {
+				if role, ok := g.principals[roleARN]; ok {
+					roles = append(roles, role)
+				}
+				break // Found match for this role, move to next role
+			}
+		}
+	}
+
+	return roles
+}
+
+// CanAssume checks if a principal can assume a specific role
+func (g *Graph) CanAssume(principalARN, roleARN string) bool {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	trustedPrincipals, ok := g.trustRelations[roleARN]
+	if !ok {
+		return false
+	}
+
+	// Check if principal is explicitly trusted or if wildcard trust exists
+	for _, trusted := range trustedPrincipals {
+		if trusted == principalARN || trusted == "*" {
+			return true
+		}
+	}
+
+	return false
+}
+
 // addPolicyEdges processes a policy document and adds edges to the graph
 func (g *Graph) addPolicyEdges(principalARN string, policy types.PolicyDocument) error {
 	for _, stmt := range policy.Statements {

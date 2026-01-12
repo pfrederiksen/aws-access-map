@@ -407,3 +407,220 @@ func TestExtractPrincipals(t *testing.T) {
 		})
 	}
 }
+
+func TestGetRolesCanAssume(t *testing.T) {
+	g := New()
+
+	// Add principals
+	user := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:user/alice",
+		Type: types.PrincipalTypeUser,
+		Name: "alice",
+	}
+	role1 := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:role/DevRole",
+		Type: types.PrincipalTypeRole,
+		Name: "DevRole",
+	}
+	role2 := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:role/ProdRole",
+		Type: types.PrincipalTypeRole,
+		Name: "ProdRole",
+	}
+
+	g.AddPrincipal(user)
+	g.AddPrincipal(role1)
+	g.AddPrincipal(role2)
+
+	// Alice can assume DevRole
+	g.AddTrustRelation(role1.ARN, user.ARN)
+	// Alice can assume ProdRole
+	g.AddTrustRelation(role2.ARN, user.ARN)
+
+	// Get roles Alice can assume
+	roles := g.GetRolesCanAssume(user.ARN)
+
+	if len(roles) != 2 {
+		t.Fatalf("GetRolesCanAssume() returned %d roles, want 2", len(roles))
+	}
+
+	// Check both roles are in the result
+	roleARNs := make(map[string]bool)
+	for _, role := range roles {
+		roleARNs[role.ARN] = true
+	}
+
+	if !roleARNs[role1.ARN] {
+		t.Errorf("GetRolesCanAssume() missing %s", role1.ARN)
+	}
+	if !roleARNs[role2.ARN] {
+		t.Errorf("GetRolesCanAssume() missing %s", role2.ARN)
+	}
+}
+
+func TestGetRolesCanAssume_NoPrincipals(t *testing.T) {
+	g := New()
+
+	user := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:user/alice",
+		Type: types.PrincipalTypeUser,
+		Name: "alice",
+	}
+	g.AddPrincipal(user)
+
+	// No trust relations added
+	roles := g.GetRolesCanAssume(user.ARN)
+
+	if len(roles) != 0 {
+		t.Errorf("GetRolesCanAssume() returned %d roles, want 0", len(roles))
+	}
+}
+
+func TestGetRolesCanAssume_Wildcard(t *testing.T) {
+	g := New()
+
+	user := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:user/alice",
+		Type: types.PrincipalTypeUser,
+		Name: "alice",
+	}
+	role := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:role/PublicRole",
+		Type: types.PrincipalTypeRole,
+		Name: "PublicRole",
+	}
+
+	g.AddPrincipal(user)
+	g.AddPrincipal(role)
+
+	// Role trusts wildcard (anyone can assume)
+	g.AddTrustRelation(role.ARN, "*")
+
+	// Alice should be able to assume the role
+	roles := g.GetRolesCanAssume(user.ARN)
+
+	if len(roles) != 1 {
+		t.Fatalf("GetRolesCanAssume() returned %d roles, want 1", len(roles))
+	}
+
+	if roles[0].ARN != role.ARN {
+		t.Errorf("GetRolesCanAssume() returned %s, want %s", roles[0].ARN, role.ARN)
+	}
+}
+
+func TestGetRolesCanAssume_Multiple(t *testing.T) {
+	g := New()
+
+	alice := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:user/alice",
+		Type: types.PrincipalTypeUser,
+		Name: "alice",
+	}
+	bob := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:user/bob",
+		Type: types.PrincipalTypeUser,
+		Name: "bob",
+	}
+	role1 := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:role/DevRole",
+		Type: types.PrincipalTypeRole,
+		Name: "DevRole",
+	}
+	role2 := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:role/AdminRole",
+		Type: types.PrincipalTypeRole,
+		Name: "AdminRole",
+	}
+
+	g.AddPrincipal(alice)
+	g.AddPrincipal(bob)
+	g.AddPrincipal(role1)
+	g.AddPrincipal(role2)
+
+	// Alice can assume DevRole
+	g.AddTrustRelation(role1.ARN, alice.ARN)
+	// Bob can assume DevRole (multiple principals for one role)
+	g.AddTrustRelation(role1.ARN, bob.ARN)
+	// Bob can assume AdminRole
+	g.AddTrustRelation(role2.ARN, bob.ARN)
+
+	// Alice should only see DevRole
+	aliceRoles := g.GetRolesCanAssume(alice.ARN)
+	if len(aliceRoles) != 1 {
+		t.Fatalf("GetRolesCanAssume(alice) returned %d roles, want 1", len(aliceRoles))
+	}
+	if aliceRoles[0].ARN != role1.ARN {
+		t.Errorf("GetRolesCanAssume(alice) returned %s, want %s", aliceRoles[0].ARN, role1.ARN)
+	}
+
+	// Bob should see both DevRole and AdminRole
+	bobRoles := g.GetRolesCanAssume(bob.ARN)
+	if len(bobRoles) != 2 {
+		t.Fatalf("GetRolesCanAssume(bob) returned %d roles, want 2", len(bobRoles))
+	}
+}
+
+func TestCanAssume(t *testing.T) {
+	g := New()
+
+	user := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:user/alice",
+		Type: types.PrincipalTypeUser,
+		Name: "alice",
+	}
+	role := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:role/DevRole",
+		Type: types.PrincipalTypeRole,
+		Name: "DevRole",
+	}
+
+	g.AddPrincipal(user)
+	g.AddPrincipal(role)
+	g.AddTrustRelation(role.ARN, user.ARN)
+
+	// Alice can assume DevRole
+	if !g.CanAssume(user.ARN, role.ARN) {
+		t.Error("CanAssume() returned false, want true for alice → DevRole")
+	}
+
+	// Alice cannot assume non-existent role
+	if g.CanAssume(user.ARN, "arn:aws:iam::123456789012:role/NonExistent") {
+		t.Error("CanAssume() returned true, want false for non-existent role")
+	}
+
+	// Bob (doesn't exist) cannot assume DevRole
+	if g.CanAssume("arn:aws:iam::123456789012:user/bob", role.ARN) {
+		t.Error("CanAssume() returned true, want false for non-trusted principal")
+	}
+}
+
+func TestCanAssume_Wildcard(t *testing.T) {
+	g := New()
+
+	user := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:user/alice",
+		Type: types.PrincipalTypeUser,
+		Name: "alice",
+	}
+	role := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:role/PublicRole",
+		Type: types.PrincipalTypeRole,
+		Name: "PublicRole",
+	}
+
+	g.AddPrincipal(user)
+	g.AddPrincipal(role)
+
+	// Role trusts wildcard
+	g.AddTrustRelation(role.ARN, "*")
+
+	// Any principal should be able to assume
+	if !g.CanAssume(user.ARN, role.ARN) {
+		t.Error("CanAssume() returned false, want true for wildcard trust")
+	}
+
+	// Even non-existent principals should match wildcard
+	if !g.CanAssume("arn:aws:iam::123456789012:user/nonexistent", role.ARN) {
+		t.Error("CanAssume() returned false, want true for wildcard trust with non-existent principal")
+	}
+}

@@ -116,12 +116,21 @@ func (e *Engine) findPublicResourceAccess() []HighRiskFinding {
 func (e *Engine) findCrossAccountAccess() []HighRiskFinding {
 	var findings []HighRiskFinding
 
-	// Get local account ID from first principal
-	var localAccountID string
+	// Get local account ID by finding the most common account ID
+	accountCounts := make(map[string]int)
 	for _, p := range e.graph.GetAllPrincipals() {
-		if p.AccountID != "" {
-			localAccountID = p.AccountID
-			break
+		if p.AccountID != "" && p.Type != types.PrincipalTypePublic {
+			accountCounts[p.AccountID]++
+		}
+	}
+
+	// Find the account ID with the most principals (likely the local account)
+	var localAccountID string
+	maxCount := 0
+	for accountID, count := range accountCounts {
+		if count > maxCount {
+			maxCount = count
+			localAccountID = accountID
 		}
 	}
 
