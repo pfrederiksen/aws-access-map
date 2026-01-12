@@ -1,0 +1,106 @@
+# GoReleaser configuration for aws-access-map
+# Documentation: https://goreleaser.com
+
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: aws-access-map
+    main: ./cmd/aws-access-map
+    binary: aws-access-map
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    # Ignore arm64 for windows (not commonly used)
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}-
+      {{- .Os }}-
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - 'typo'
+  groups:
+    - title: 'New Features'
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: 'Bug Fixes'
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: 'Performance Improvements'
+      regexp: '^.*?perf(\(.+\))??!?:.+$'
+      order: 2
+    - title: 'Other Changes'
+      order: 999
+
+release:
+  github:
+    owner: pfrederiksen
+    name: aws-access-map
+  draft: false
+  prerelease: auto
+  name_template: "v{{.Version}}"
+  footer: |
+    ## Installation
+
+    **macOS (Homebrew):**
+    ```bash
+    brew tap pfrederiksen/aws-access-map
+    brew install aws-access-map
+    ```
+
+    **Go Install:**
+    ```bash
+    go install github.com/pfrederiksen/aws-access-map/cmd/aws-access-map@{{.Tag}}
+    ```
+
+    **Docker:**
+    ```bash
+    docker pull ghcr.io/pfrederiksen/aws-access-map:{{.Tag}}
+    ```
+
+    ---
+
+    🤖 Built with [Claude Code](https://claude.com/claude-code)
+
+announce:
+  skip: false

@@ -154,6 +154,59 @@ go test -v ./internal/graph/
 - Support profile selection: `--profile <name>`
 - Cache location: `~/.aws-access-map/cache/`
 
+### Git Workflow
+
+**IMPORTANT: Always create a new branch for any work.**
+
+**Branch Naming:**
+- Features: `feat/descriptive-name` (e.g., `feat/automated-releases`)
+- Bug fixes: `fix/issue-description` (e.g., `fix/wildcard-matching`)
+- Documentation: `docs/what-changed` (e.g., `docs/update-readme`)
+- Tests: `test/what-testing` (e.g., `test/add-graph-tests`)
+- Chores: `chore/task-name` (e.g., `chore/update-dependencies`)
+
+**Workflow:**
+```bash
+# Create branch from main
+git checkout main
+git pull
+git checkout -b feat/my-feature
+
+# Make changes, commit frequently
+git add .
+git commit -m "feat: add feature X"
+
+# Push and create PR
+git push -u origin feat/my-feature
+gh pr create --title "feat: Add feature X" --body "Description..."
+
+# After approval, merge via GitHub
+# Branch is auto-deleted after merge
+```
+
+**Commit Messages:**
+- Use conventional commits: `type: description`
+- Types: `feat`, `fix`, `docs`, `test`, `chore`, `refactor`, `perf`
+- Include `Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>` for AI-assisted work
+- Examples:
+  - `feat: add wildcard matching with glob patterns`
+  - `fix: validate principal exists before checking access`
+  - `test: add comprehensive tests for policy parsing`
+  - `docs: update README for v0.1.0 release`
+
+**Pull Requests:**
+- One feature/fix per PR (keep focused)
+- Include test coverage changes
+- Update relevant documentation
+- All tests must pass
+- Branch protection requires PR review (use `--admin` flag if solo)
+
+**Never commit directly to main** - always use branches and PRs for:
+- Audit trail of changes
+- CI/CD validation
+- Review process (even if self-reviewing)
+- Clean git history
+
 ## Code Style
 
 - Follow standard Go conventions (gofmt, golint)
