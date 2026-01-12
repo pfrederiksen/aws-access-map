@@ -114,11 +114,11 @@ func pathCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "path",
-		Short: "[EXPERIMENTAL] Find access paths from a principal to a resource",
-		Long:  `[EXPERIMENTAL] Discover all paths from a principal to a resource, including role assumption chains.
+		Short: "Find access paths from a principal to a resource",
+		Long:  `Discover all paths from a principal to a resource, including role assumption chains.
 
-Note: This command is experimental. Currently only checks direct access.
-Role assumption chains and transitive access are not yet implemented.`,
+This command uses BFS to find both direct access and transitive access through role assumptions.
+It will show all paths up to 5 hops (configurable max depth) and return up to 10 paths.`,
 		Example: `  aws-access-map path \
     --from arn:aws:iam::123456789012:role/AppRole \
     --to arn:aws:s3:::sensitive-bucket \

@@ -213,10 +213,18 @@ aws-access-map path \
   --action s3:GetObject
 ```
 
-**Current behavior:**
+**Features:**
 - ✅ Finds direct access paths
-- ⏳ Role assumption chains not yet implemented
-- ⏳ Multi-hop paths (User → Role A → Role B → Resource) coming soon
+- ✅ Discovers role assumption chains (multi-hop paths)
+- ✅ BFS traversal for shortest paths
+- ✅ Cycle detection and max depth limiting (default: 5 hops)
+- ✅ Finds multiple paths when they exist (up to 10 paths)
+- ✅ JSON output format with `--format json` flag
+
+**Example multi-hop path:**
+```
+User Alice → AssumeRole(DevRole) → AssumeRole(ProdRole) → s3:GetObject → bucket
+```
 
 ### `report`
 Generate security reports highlighting high-risk access patterns.
@@ -276,15 +284,15 @@ aws-access-map report --format json                 # JSON output for CI/CD
 - Parse inline and managed policies
 - Build in-memory permission graph with resource policies
 - Query direct access (`who-can`, `path` commands)
+- **Role assumption chain traversal** (multi-hop path finding with BFS)
 - Security audit reports with 5 high-risk pattern detections
 - JSON output format for CI/CD automation
 - Full wildcard matching (glob patterns: `*`, `s3:Get*`, `iam:*User*`)
-- 95%+ test coverage with 60+ comprehensive tests
+- 87%+ test coverage with 70+ comprehensive tests
 
-**⚠️  Limitations (MVP)**
-- Policy conditions are not evaluated (v2 feature)
-- Role assumption chains not traversed (v2 feature)
-- Single account only (multi-account planned)
+**⚠️  Limitations**
+- Policy conditions are not evaluated (future feature)
+- Single account only (multi-account planned for future release)
 
 See [TESTING.md](TESTING.md) for detailed test results and known issues.
 
@@ -318,7 +326,7 @@ See [CLAUDE.md](CLAUDE.md) for development guide and architecture deep dive.
 | Cost | **$0** | $0 | $0 | **$500-5000/mo** |
 | AWS API charges | **$0** | $0 | $0 | Varies |
 | Installation | Binary | Browser | Built-in | Agents/SaaS |
-| Role chains | Coming soon | Limited | Manual | ✅ |
+| Role chains | ✅ | Limited | Manual | ✅ |
 | Scripting | ✅ | ❌ | Complex | API |
 | Offline | ✅ Cache | ❌ | ❌ | Varies |
 | Open source | ✅ | ❌ | ✅ | ❌ |
