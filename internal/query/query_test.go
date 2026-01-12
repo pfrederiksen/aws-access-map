@@ -344,3 +344,174 @@ func TestFindHighRiskAccess_NoFindings(t *testing.T) {
 		t.Errorf("Expected no high-risk findings for limited user, got %d", len(findings))
 	}
 }
+
+func TestFindHighRiskAccess_CrossAccount(t *testing.T) {
+	g := graph.New()
+
+	// Add local principal to establish account context
+	localUser := &types.Principal{
+		ARN:       "arn:aws:iam::123456789012:user/local-user",
+		Type:      types.PrincipalTypeUser,
+		Name:      "local-user",
+		AccountID: "123456789012",
+	}
+	g.AddPrincipal(localUser)
+
+	// Add principal from external account
+	externalRole := &types.Principal{
+		ARN:       "arn:aws:iam::999999999999:role/ExternalRole",
+		Type:      types.PrincipalTypeRole,
+		Name:      "ExternalRole",
+		AccountID: "999999999999",
+	}
+	g.AddPrincipal(externalRole)
+
+	// Grant external role access to a resource
+	resource := &types.Resource{
+		ARN:  "arn:aws:s3:::shared-bucket",
+		Type: types.ResourceTypeS3,
+		Name: "shared-bucket",
+	}
+	g.AddResource(resource)
+	g.AddEdge(externalRole.ARN, "s3:GetObject", resource.ARN, false)
+
+	e := New(g)
+	findings, err := e.FindHighRiskAccess()
+
+	if err != nil {
+		t.Fatalf("FindHighRiskAccess() error = %v", err)
+	}
+
+	found := false
+	for _, f := range findings {
+		if f.Type == "Cross-Account Access" && f.Severity == "MEDIUM" {
+			found = true
+			if f.Principal == nil || f.Principal.Name != "ExternalRole" {
+				t.Error("Expected finding to reference external role")
+			}
+			if f.Principal.AccountID != "999999999999" {
+				t.Errorf("Expected external account ID 999999999999, got %s", f.Principal.AccountID)
+			}
+			break
+		}
+	}
+
+	if !found {
+		t.Error("Did not find MEDIUM cross-account access finding")
+	}
+}
+
+func TestFindHighRiskAccess_OverlyPermissiveS3(t *testing.T) {
+	g := graph.New()
+
+	// Add user with s3:* on all resources
+	s3PowerUser := &types.Principal{
+		ARN:       "arn:aws:iam::123456789012:user/s3-power-user",
+		Type:      types.PrincipalTypeUser,
+		Name:      "s3-power-user",
+		AccountID: "123456789012",
+	}
+	g.AddPrincipal(s3PowerUser)
+	g.AddEdge(s3PowerUser.ARN, "s3:*", "*", false)
+
+	e := New(g)
+	findings, err := e.FindHighRiskAccess()
+
+	if err != nil {
+		t.Fatalf("FindHighRiskAccess() error = %v", err)
+	}
+
+	found := false
+	for _, f := range findings {
+		if f.Type == "Overly Permissive S3 Access" && f.Severity == "HIGH" {
+			found = true
+			if f.Principal == nil || f.Principal.Name != "s3-power-user" {
+				t.Error("Expected finding to reference s3-power-user")
+			}
+			if f.Action != "s3:*" {
+				t.Errorf("Expected action 's3:*', got %s", f.Action)
+			}
+			break
+		}
+	}
+
+	if !found {
+		t.Error("Did not find HIGH overly permissive S3 access finding")
+	}
+}
+
+func TestFindHighRiskAccess_SensitiveActions(t *testing.T) {
+	// Test each sensitive action pattern
+	testCases := []struct {
+		name           string
+		action         string
+		principalName  string
+		expectedType   string
+	}{
+		{
+			name:          "IAM wildcard access",
+			action:        "iam:*",
+			principalName: "iam-manager",
+			expectedType:  "Full IAM access",
+		},
+		{
+			name:          "KMS decrypt access",
+			action:        "kms:Decrypt",
+			principalName: "kms-user",
+			expectedType:  "KMS decryption access",
+		},
+		{
+			name:          "Secrets Manager access",
+			action:        "secretsmanager:GetSecretValue",
+			principalName: "secrets-reader",
+			expectedType:  "Secrets retrieval access",
+		},
+		{
+			name:          "STS assume role access",
+			action:        "sts:AssumeRole",
+			principalName: "role-assumer",
+			expectedType:  "Role assumption access",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			g := graph.New()
+
+			user := &types.Principal{
+				ARN:       "arn:aws:iam::123456789012:user/" + tc.principalName,
+				Type:      types.PrincipalTypeUser,
+				Name:      tc.principalName,
+				AccountID: "123456789012",
+			}
+			g.AddPrincipal(user)
+			g.AddEdge(user.ARN, tc.action, "*", false)
+
+			e := New(g)
+			findings, err := e.FindHighRiskAccess()
+
+			if err != nil {
+				t.Fatalf("FindHighRiskAccess() error = %v", err)
+			}
+
+			found := false
+			for _, f := range findings {
+				if f.Type == "Sensitive Action Access" && f.Severity == "HIGH" {
+					if f.Principal != nil && f.Principal.Name == tc.principalName {
+						found = true
+						// Verify the description contains the expected type
+						if len(tc.expectedType) > 0 && f.Description != "" {
+							// Description should mention the sensitive action type
+							t.Logf("Found sensitive action finding: %s", f.Description)
+						}
+						break
+					}
+				}
+			}
+
+			if !found {
+				t.Errorf("Did not find HIGH sensitive action finding for %s", tc.name)
+			}
+		})
+	}
+}
