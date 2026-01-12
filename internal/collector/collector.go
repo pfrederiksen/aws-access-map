@@ -3,6 +3,7 @@ package collector
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
@@ -48,7 +49,8 @@ func New(ctx context.Context, region, profile string, debug bool) (*Collector, e
 // Collect fetches all relevant AWS data
 func (c *Collector) Collect(ctx context.Context) (*types.CollectionResult, error) {
 	result := &types.CollectionResult{
-		Regions: []string{c.region},
+		Regions:     []string{c.region},
+		CollectedAt: time.Now(),
 	}
 
 	// Get account ID
