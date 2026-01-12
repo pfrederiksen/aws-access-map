@@ -25,8 +25,13 @@ jobs:
           go-version: ${{ matrix.go }}
           cache: true
 
-      - name: Run tests
+      - name: Run tests (Unix)
+        if: runner.os != 'Windows'
         run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Run tests (Windows)
+        if: runner.os == 'Windows'
+        run: go test -v ./...
 
       - name: Upload coverage
         if: matrix.os == 'ubuntu-latest' && matrix.go == '1.23'
