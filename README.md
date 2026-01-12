@@ -161,20 +161,24 @@ aws-access-map collect
 Fetch IAM data from your AWS account and save it locally.
 
 ```bash
-aws-access-map collect [--output FILE] [--profile PROFILE] [--region REGION]
+aws-access-map collect [--output FILE] [--profile PROFILE] [--region REGION] [--format FORMAT]
 
 # Examples:
 aws-access-map collect                              # Saves to aws-access-data.json
 aws-access-map collect --output prod-account.json   # Custom filename
 aws-access-map collect --profile prod               # Use specific AWS profile
+aws-access-map collect --format json                # JSON output (machine-readable)
 ```
 
 **What it collects:**
 - ✅ IAM users (with inline and managed policies)
 - ✅ IAM roles (with trust policies and permissions)
-- ✅ IAM groups (coming soon)
-- ⏳ S3 bucket policies (roadmap)
-- ⏳ KMS key policies (roadmap)
+- ✅ S3 bucket policies
+- ✅ KMS key policies
+- ✅ SQS queue policies
+- ✅ SNS topic policies
+- ✅ Secrets Manager resource policies
+- ⏳ IAM groups (roadmap)
 - ⏳ Service Control Policies (roadmap)
 
 ### `who-can`
@@ -191,8 +195,9 @@ aws-access-map who-can "arn:aws:kms:us-east-1:*:key/*" --action "kms:Decrypt"
 
 **Current behavior:**
 - ✅ Queries identity-based policies (IAM users/roles)
+- ✅ Queries resource-based policies (S3, KMS, SQS, SNS, Secrets Manager)
 - ✅ Full wildcard matching (supports `*`, `s3:Get*`, `iam:*User*`, etc.)
-- ⏳ Resource-based policies not yet supported
+- ✅ JSON output format with `--format json` flag
 - ⏳ Condition evaluation not yet supported
 
 ### `path`
@@ -217,15 +222,20 @@ aws-access-map path \
 Generate security reports highlighting high-risk access patterns.
 
 ```bash
-aws-access-map report [--account ACCOUNT_ID] [--high-risk]
+aws-access-map report [--account ACCOUNT_ID] [--high-risk] [--format FORMAT]
 
-# Example:
-aws-access-map report --high-risk
+# Examples:
+aws-access-map report                               # Show all findings
+aws-access-map report --high-risk                   # Only high-risk findings
+aws-access-map report --format json                 # JSON output for CI/CD
 ```
 
-**Current behavior:**
-- ⏳ Report generation not yet implemented
-- Planned findings: admin access, public resources, cross-account trust, etc.
+**Detects 5 high-risk patterns:**
+- ✅ **Admin Access** (CRITICAL): Principals with unrestricted wildcard permissions (`Action: *, Resource: *`)
+- ✅ **Public Access** (HIGH/CRITICAL): Resources accessible by anonymous users (Principal: `*`)
+- ✅ **Cross-Account Access** (MEDIUM): Principals from external AWS accounts
+- ✅ **Overly Permissive S3** (HIGH): Principals with `s3:*` on all buckets
+- ✅ **Sensitive Actions** (HIGH): Access to IAM/KMS/Secrets Manager/STS on all resources
 
 ## How It Works
 
@@ -262,17 +272,19 @@ aws-access-map report --high-risk
 
 **✅ Working**
 - Collect IAM users and roles from AWS
+- Collect resource policies (S3, KMS, SQS, SNS, Secrets Manager)
 - Parse inline and managed policies
-- Build in-memory permission graph
-- Query direct access (`who-can` command)
+- Build in-memory permission graph with resource policies
+- Query direct access (`who-can`, `path` commands)
+- Security audit reports with 5 high-risk pattern detections
+- JSON output format for CI/CD automation
 - Full wildcard matching (glob patterns: `*`, `s3:Get*`, `iam:*User*`)
-- 90%+ test coverage with 50 comprehensive tests
+- 95%+ test coverage with 60+ comprehensive tests
 
 **⚠️  Limitations (MVP)**
-- Policy conditions are not evaluated
-- No resource-based policies yet (S3, KMS, etc.)
-- Role assumption chains not traversed
-- Single account only
+- Policy conditions are not evaluated (v2 feature)
+- Role assumption chains not traversed (v2 feature)
+- Single account only (multi-account planned)
 
 See [TESTING.md](TESTING.md) for detailed test results and known issues.
 
