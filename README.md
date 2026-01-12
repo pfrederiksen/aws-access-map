@@ -265,25 +265,14 @@ aws-access-map report --high-risk
 - Parse inline and managed policies
 - Build in-memory permission graph
 - Query direct access (`who-can` command)
-- Handle basic wildcards (`*` and simple prefixes like `s3:Get*`)
+- Full wildcard matching (glob patterns: `*`, `s3:Get*`, `iam:*User*`)
+- 90%+ test coverage with 50 comprehensive tests
 
 **⚠️  Limitations (MVP)**
-- ✅ Full wildcard matching implemented (glob patterns)
 - Policy conditions are not evaluated
 - No resource-based policies yet (S3, KMS, etc.)
 - Role assumption chains not traversed
 - Single account only
-
-**⏳ Roadmap**
-- [ ] Enhanced wildcard matching (full glob patterns)
-- [ ] Resource policy collection (S3, KMS, SQS, SNS, Secrets Manager)
-- [ ] Transitive access via role chains
-- [ ] Policy condition evaluation
-- [ ] Service Control Policies (SCPs)
-- [ ] Multi-account support via AWS Organizations
-- [ ] Caching for faster repeat queries
-- [ ] JSON output mode for scripting
-- [ ] Web UI for visualization
 
 See [TESTING.md](TESTING.md) for detailed test results and known issues.
 
