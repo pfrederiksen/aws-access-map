@@ -1,8 +1,8 @@
 module github.com/pfrederiksen/aws-access-map
 
-go 1.22
+go 1.23
 
-toolchain go1.22.12
+toolchain go1.23.0
 
 require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.7
