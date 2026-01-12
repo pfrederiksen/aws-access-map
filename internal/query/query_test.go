@@ -1,6 +1,7 @@
 package query
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/pfrederiksen/aws-access-map/internal/graph"
@@ -237,6 +238,496 @@ func TestFindPaths_PrincipalNotFound(t *testing.T) {
 	}
 }
 
+func TestFindPaths_SingleRoleAssumption(t *testing.T) {
+	// Create user Alice
+	alice := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:user/alice",
+		Type: types.PrincipalTypeUser,
+		Name: "alice",
+	}
+
+	// Create role DevRole that Alice can assume
+	devRole := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:role/DevRole",
+		Type: types.PrincipalTypeRole,
+		Name: "DevRole",
+		Policies: []types.PolicyDocument{
+			{
+				Version: "2012-10-17",
+				Statements: []types.Statement{
+					{
+						Effect:   types.EffectAllow,
+						Action:   "s3:GetObject",
+						Resource: "arn:aws:s3:::dev-bucket/*",
+					},
+				},
+			},
+		},
+		TrustPolicy: &types.PolicyDocument{
+			Version: "2012-10-17",
+			Statements: []types.Statement{
+				{
+					Effect: types.EffectAllow,
+					Principal: map[string]interface{}{
+						"AWS": alice.ARN,
+					},
+					Action: "sts:AssumeRole",
+				},
+			},
+		},
+	}
+
+	// Create S3 bucket resource
+	bucket := &types.Resource{
+		ARN:  "arn:aws:s3:::dev-bucket/*",
+		Type: types.ResourceTypeS3,
+		Name: "dev-bucket",
+	}
+
+	// Build graph from collection
+	collection := &types.CollectionResult{
+		Principals: []*types.Principal{alice, devRole},
+		Resources:  []*types.Resource{bucket},
+	}
+	g, err := graph.Build(collection)
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	e := New(g)
+
+	// Find paths from Alice to dev-bucket
+	paths, err := e.FindPaths(alice.ARN, bucket.ARN, "s3:GetObject")
+	if err != nil {
+		t.Fatalf("FindPaths() error = %v", err)
+	}
+
+	if len(paths) == 0 {
+		t.Fatal("FindPaths() should find path through role assumption")
+	}
+
+	// Verify path: Alice → AssumeRole → DevRole → s3:GetObject → bucket
+	path := paths[0]
+	if len(path.Hops) != 2 {
+		t.Fatalf("Expected 2 hops, got %d", len(path.Hops))
+	}
+
+	// First hop: Alice → AssumeRole → DevRole
+	if path.Hops[0].Action != "sts:AssumeRole" {
+		t.Errorf("First hop action should be sts:AssumeRole, got %s", path.Hops[0].Action)
+	}
+	if path.Hops[0].PolicyType != types.PolicyTypeTrust {
+		t.Errorf("First hop should be trust policy, got %s", path.Hops[0].PolicyType)
+	}
+
+	// Second hop: DevRole → s3:GetObject → bucket
+	if path.Hops[1].Action != "s3:GetObject" {
+		t.Errorf("Second hop action should be s3:GetObject, got %s", path.Hops[1].Action)
+	}
+	if path.Hops[1].PolicyType != types.PolicyTypeIdentity {
+		t.Errorf("Second hop should be identity policy, got %s", path.Hops[1].PolicyType)
+	}
+}
+
+func TestFindPaths_TwoHopRoleChain(t *testing.T) {
+	// Alice → DevRole → ProdRole → prod-bucket
+	alice := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:user/alice",
+		Type: types.PrincipalTypeUser,
+		Name: "alice",
+	}
+
+	devRole := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:role/DevRole",
+		Type: types.PrincipalTypeRole,
+		Name: "DevRole",
+		TrustPolicy: &types.PolicyDocument{
+			Version: "2012-10-17",
+			Statements: []types.Statement{
+				{
+					Effect: types.EffectAllow,
+					Principal: map[string]interface{}{
+						"AWS": alice.ARN,
+					},
+					Action: "sts:AssumeRole",
+				},
+			},
+		},
+	}
+
+	prodRole := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:role/ProdRole",
+		Type: types.PrincipalTypeRole,
+		Name: "ProdRole",
+		Policies: []types.PolicyDocument{
+			{
+				Version: "2012-10-17",
+				Statements: []types.Statement{
+					{
+						Effect:   types.EffectAllow,
+						Action:   "s3:*",
+						Resource: "arn:aws:s3:::prod-bucket/*",
+					},
+				},
+			},
+		},
+		TrustPolicy: &types.PolicyDocument{
+			Version: "2012-10-17",
+			Statements: []types.Statement{
+				{
+					Effect: types.EffectAllow,
+					Principal: map[string]interface{}{
+						"AWS": devRole.ARN,
+					},
+					Action: "sts:AssumeRole",
+				},
+			},
+		},
+	}
+
+	bucket := &types.Resource{
+		ARN:  "arn:aws:s3:::prod-bucket/*",
+		Type: types.ResourceTypeS3,
+		Name: "prod-bucket",
+	}
+
+	collection := &types.CollectionResult{
+		Principals: []*types.Principal{alice, devRole, prodRole},
+		Resources:  []*types.Resource{bucket},
+	}
+	g, err := graph.Build(collection)
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	e := New(g)
+
+	paths, err := e.FindPaths(alice.ARN, bucket.ARN, "s3:GetObject")
+	if err != nil {
+		t.Fatalf("FindPaths() error = %v", err)
+	}
+
+	if len(paths) == 0 {
+		t.Fatal("FindPaths() should find 2-hop role chain path")
+	}
+
+	// Verify 3 hops: Alice → DevRole → ProdRole → bucket
+	path := paths[0]
+	if len(path.Hops) != 3 {
+		t.Fatalf("Expected 3 hops, got %d", len(path.Hops))
+	}
+
+	// Verify hop sequence
+	if path.Hops[0].Action != "sts:AssumeRole" {
+		t.Errorf("Hop 1 should be AssumeRole, got %s", path.Hops[0].Action)
+	}
+	if path.Hops[1].Action != "sts:AssumeRole" {
+		t.Errorf("Hop 2 should be AssumeRole, got %s", path.Hops[1].Action)
+	}
+	if path.Hops[2].Action != "s3:GetObject" {
+		t.Errorf("Hop 3 should be s3:GetObject, got %s", path.Hops[2].Action)
+	}
+}
+
+func TestFindPaths_CycleDetection(t *testing.T) {
+	g := graph.New()
+
+	// Role A and Role B can assume each other (cycle)
+	roleA := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:role/RoleA",
+		Type: types.PrincipalTypeRole,
+		Name: "RoleA",
+	}
+
+	roleB := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:role/RoleB",
+		Type: types.PrincipalTypeRole,
+		Name: "RoleB",
+	}
+
+	bucket := &types.Resource{
+		ARN:  "arn:aws:s3:::test-bucket/*",
+		Type: types.ResourceTypeS3,
+		Name: "test-bucket",
+	}
+
+	g.AddPrincipal(roleA)
+	g.AddPrincipal(roleB)
+	g.AddResource(bucket)
+
+	// Create cycle: A can assume B, B can assume A
+	g.AddTrustRelation(roleA.ARN, roleB.ARN)
+	g.AddTrustRelation(roleB.ARN, roleA.ARN)
+
+	e := New(g)
+
+	// FindPaths should not hang (cycle detection should work)
+	paths, err := e.FindPaths(roleA.ARN, bucket.ARN, "s3:GetObject")
+	if err != nil {
+		t.Fatalf("FindPaths() error = %v", err)
+	}
+
+	// Should find no paths (neither role has access to bucket)
+	if len(paths) != 0 {
+		t.Errorf("Expected no paths with cycle and no access, got %d", len(paths))
+	}
+}
+
+func TestFindPaths_MaxDepthLimit(t *testing.T) {
+	g := graph.New()
+
+	// Create a chain of 10 roles (exceeds max depth of 5)
+	roles := make([]*types.Principal, 10)
+	for i := 0; i < 10; i++ {
+		roles[i] = &types.Principal{
+			ARN:  fmt.Sprintf("arn:aws:iam::123456789012:role/Role%d", i),
+			Type: types.PrincipalTypeRole,
+			Name: fmt.Sprintf("Role%d", i),
+		}
+		g.AddPrincipal(roles[i])
+	}
+
+	// Chain them: Role0 can assume Role1, Role1 can assume Role2, etc.
+	for i := 0; i < 9; i++ {
+		g.AddTrustRelation(roles[i+1].ARN, roles[i].ARN)
+	}
+
+	// Role9 (last) has access to bucket
+	bucket := &types.Resource{
+		ARN:  "arn:aws:s3:::test-bucket/*",
+		Type: types.ResourceTypeS3,
+		Name: "test-bucket",
+	}
+	g.AddResource(bucket)
+
+	roles[9].Policies = []types.PolicyDocument{
+		{
+			Version: "2012-10-17",
+			Statements: []types.Statement{
+				{
+					Effect:   types.EffectAllow,
+					Action:   "s3:GetObject",
+					Resource: bucket.ARN,
+				},
+			},
+		},
+	}
+
+	collection := &types.CollectionResult{
+		Principals: roles,
+		Resources:  []*types.Resource{bucket},
+	}
+	g, err := graph.Build(collection)
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	e := New(g)
+
+	// Try to find path from Role0 to bucket (requires 10 hops, exceeds limit of 5)
+	paths, err := e.FindPaths(roles[0].ARN, bucket.ARN, "s3:GetObject")
+	if err != nil {
+		t.Fatalf("FindPaths() error = %v", err)
+	}
+
+	// Should find no paths due to max depth limit
+	if len(paths) != 0 {
+		t.Errorf("Expected no paths due to max depth, got %d", len(paths))
+	}
+}
+
+func TestFindPaths_MultiplePaths(t *testing.T) {
+	// Alice can reach bucket via TWO different roles
+	alice := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:user/alice",
+		Type: types.PrincipalTypeUser,
+		Name: "alice",
+	}
+
+	devRole := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:role/DevRole",
+		Type: types.PrincipalTypeRole,
+		Name: "DevRole",
+		Policies: []types.PolicyDocument{
+			{
+				Version: "2012-10-17",
+				Statements: []types.Statement{
+					{
+						Effect:   types.EffectAllow,
+						Action:   "s3:GetObject",
+						Resource: "arn:aws:s3:::test-bucket/*",
+					},
+				},
+			},
+		},
+		TrustPolicy: &types.PolicyDocument{
+			Version: "2012-10-17",
+			Statements: []types.Statement{
+				{
+					Effect: types.EffectAllow,
+					Principal: map[string]interface{}{
+						"AWS": alice.ARN,
+					},
+					Action: "sts:AssumeRole",
+				},
+			},
+		},
+	}
+
+	adminRole := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:role/AdminRole",
+		Type: types.PrincipalTypeRole,
+		Name: "AdminRole",
+		Policies: []types.PolicyDocument{
+			{
+				Version: "2012-10-17",
+				Statements: []types.Statement{
+					{
+						Effect:   types.EffectAllow,
+						Action:   "*",
+						Resource: "*",
+					},
+				},
+			},
+		},
+		TrustPolicy: &types.PolicyDocument{
+			Version: "2012-10-17",
+			Statements: []types.Statement{
+				{
+					Effect: types.EffectAllow,
+					Principal: map[string]interface{}{
+						"AWS": alice.ARN,
+					},
+					Action: "sts:AssumeRole",
+				},
+			},
+		},
+	}
+
+	bucket := &types.Resource{
+		ARN:  "arn:aws:s3:::test-bucket/*",
+		Type: types.ResourceTypeS3,
+		Name: "test-bucket",
+	}
+
+	collection := &types.CollectionResult{
+		Principals: []*types.Principal{alice, devRole, adminRole},
+		Resources:  []*types.Resource{bucket},
+	}
+	g, err := graph.Build(collection)
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	e := New(g)
+
+	paths, err := e.FindPaths(alice.ARN, bucket.ARN, "s3:GetObject")
+	if err != nil {
+		t.Fatalf("FindPaths() error = %v", err)
+	}
+
+	// Should find 2 paths (via DevRole and via AdminRole)
+	if len(paths) != 2 {
+		t.Errorf("Expected 2 paths, got %d", len(paths))
+	}
+}
+
+func TestFindPaths_DirectAndIndirectAccess(t *testing.T) {
+	// Alice has BOTH direct access AND can assume a role with access
+	alice := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:user/alice",
+		Type: types.PrincipalTypeUser,
+		Name: "alice",
+		Policies: []types.PolicyDocument{
+			{
+				Version: "2012-10-17",
+				Statements: []types.Statement{
+					{
+						Effect:   types.EffectAllow,
+						Action:   "s3:GetObject",
+						Resource: "arn:aws:s3:::test-bucket/*",
+					},
+				},
+			},
+		},
+	}
+
+	devRole := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:role/DevRole",
+		Type: types.PrincipalTypeRole,
+		Name: "DevRole",
+		Policies: []types.PolicyDocument{
+			{
+				Version: "2012-10-17",
+				Statements: []types.Statement{
+					{
+						Effect:   types.EffectAllow,
+						Action:   "s3:*",
+						Resource: "*",
+					},
+				},
+			},
+		},
+		TrustPolicy: &types.PolicyDocument{
+			Version: "2012-10-17",
+			Statements: []types.Statement{
+				{
+					Effect: types.EffectAllow,
+					Principal: map[string]interface{}{
+						"AWS": alice.ARN,
+					},
+					Action: "sts:AssumeRole",
+				},
+			},
+		},
+	}
+
+	bucket := &types.Resource{
+		ARN:  "arn:aws:s3:::test-bucket/*",
+		Type: types.ResourceTypeS3,
+		Name: "test-bucket",
+	}
+
+	collection := &types.CollectionResult{
+		Principals: []*types.Principal{alice, devRole},
+		Resources:  []*types.Resource{bucket},
+	}
+	g, err := graph.Build(collection)
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	e := New(g)
+
+	paths, err := e.FindPaths(alice.ARN, bucket.ARN, "s3:GetObject")
+	if err != nil {
+		t.Fatalf("FindPaths() error = %v", err)
+	}
+
+	// Should find 2 paths: direct and via role
+	if len(paths) != 2 {
+		t.Errorf("Expected 2 paths (direct + via role), got %d", len(paths))
+	}
+
+	// Verify one is direct (1 hop) and one is via role (2 hops)
+	foundDirect := false
+	foundViaRole := false
+	for _, path := range paths {
+		if len(path.Hops) == 1 {
+			foundDirect = true
+		} else if len(path.Hops) == 2 {
+			foundViaRole = true
+		}
+	}
+
+	if !foundDirect {
+		t.Error("Should find direct access path")
+	}
+	if !foundViaRole {
+		t.Error("Should find indirect access path via role")
+	}
+}
+
 func TestFindHighRiskAccess_AdminUser(t *testing.T) {
 	g := graph.New()
 
@@ -348,7 +839,7 @@ func TestFindHighRiskAccess_NoFindings(t *testing.T) {
 func TestFindHighRiskAccess_CrossAccount(t *testing.T) {
 	g := graph.New()
 
-	// Add local principal to establish account context
+	// Add multiple local principals to establish account context
 	localUser := &types.Principal{
 		ARN:       "arn:aws:iam::123456789012:user/local-user",
 		Type:      types.PrincipalTypeUser,
@@ -356,6 +847,14 @@ func TestFindHighRiskAccess_CrossAccount(t *testing.T) {
 		AccountID: "123456789012",
 	}
 	g.AddPrincipal(localUser)
+
+	localRole := &types.Principal{
+		ARN:       "arn:aws:iam::123456789012:role/local-role",
+		Type:      types.PrincipalTypeRole,
+		Name:      "local-role",
+		AccountID: "123456789012",
+	}
+	g.AddPrincipal(localRole)
 
 	// Add principal from external account
 	externalRole := &types.Principal{
