@@ -10,6 +10,7 @@ import (
 	"github.com/pfrederiksen/aws-access-map/internal/collector"
 	"github.com/pfrederiksen/aws-access-map/internal/graph"
 	"github.com/pfrederiksen/aws-access-map/internal/query"
+	"github.com/pfrederiksen/aws-access-map/pkg/output"
 )
 
 var (
@@ -20,6 +21,7 @@ var (
 	profile string
 	debug   bool
 	region  string
+	format  string
 )
 
 func main() {
@@ -34,6 +36,7 @@ to answer access questions about your AWS infrastructure.`,
 	rootCmd.PersistentFlags().StringVar(&profile, "profile", "", "AWS profile to use")
 	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "Enable debug logging")
 	rootCmd.PersistentFlags().StringVar(&region, "region", "", "AWS region (defaults to profile region)")
+	rootCmd.PersistentFlags().StringVar(&format, "format", "text", "Output format (text|json)")
 
 	// Add commands
 	rootCmd.AddCommand(versionCmd())
@@ -164,9 +167,20 @@ Use 'who-can "*" --action "*"' to find admin users manually for now.`,
 }
 
 func runCollect(outputFile string) error {
+	// Validate format
+	if format != "text" && format != "json" {
+		return fmt.Errorf("invalid format: %s (must be 'text' or 'json')", format)
+	}
+
 	ctx := context.Background()
 
-	fmt.Println("Collecting AWS IAM data...")
+	// Send progress messages to stderr when using JSON format
+	logOutput := os.Stdout
+	if format == "json" {
+		logOutput = os.Stderr
+	}
+
+	fmt.Fprintln(logOutput, "Collecting AWS IAM data...")
 
 	// Create collector
 	col, err := collector.New(ctx, region, profile, debug)
@@ -180,16 +194,13 @@ func runCollect(outputFile string) error {
 		return fmt.Errorf("failed to collect data: %w", err)
 	}
 
-	fmt.Printf("Collected %d principals\n", len(result.Principals))
-	fmt.Printf("Collected %d resources\n", len(result.Resources))
-
 	// Debug: Check statements before marshaling
 	if debug && len(result.Principals) > 0 && len(result.Principals[0].Policies) > 0 {
-		fmt.Printf("DEBUG: First principal has %d policies\n", len(result.Principals[0].Policies))
-		fmt.Printf("DEBUG: First policy has %d statements\n", len(result.Principals[0].Policies[0].Statements))
+		fmt.Fprintf(logOutput, "DEBUG: First principal has %d policies\n", len(result.Principals[0].Policies))
+		fmt.Fprintf(logOutput, "DEBUG: First policy has %d statements\n", len(result.Principals[0].Policies[0].Statements))
 	}
 
-	// Save to file
+	// Save to file (always save as JSON)
 	data, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal data: %w", err)
@@ -199,12 +210,23 @@ func runCollect(outputFile string) error {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 
-	fmt.Printf("Data saved to %s\n", outputFile)
-	return nil
+	// Print summary using output formatter
+	return output.PrintCollect(format, result, outputFile)
 }
 
 func runWhoCan(resource, action string) error {
+	// Validate format
+	if format != "text" && format != "json" {
+		return fmt.Errorf("invalid format: %s (must be 'text' or 'json')", format)
+	}
+
 	ctx := context.Background()
+
+	// Send progress messages to stderr when using JSON format
+	logOutput := os.Stdout
+	if format == "json" {
+		logOutput = os.Stderr
+	}
 
 	// For MVP, collect data on the fly
 	// TODO: Load from cached file
@@ -213,19 +235,19 @@ func runWhoCan(resource, action string) error {
 		return fmt.Errorf("failed to create collector: %w", err)
 	}
 
-	fmt.Println("Collecting AWS data...")
+	fmt.Fprintln(logOutput, "Collecting AWS data...")
 	result, err := col.Collect(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to collect data: %w", err)
 	}
 
-	fmt.Println("Building access graph...")
+	fmt.Fprintln(logOutput, "Building access graph...")
 	g, err := graph.Build(result)
 	if err != nil {
 		return fmt.Errorf("failed to build graph: %w", err)
 	}
 
-	fmt.Printf("Querying who can perform '%s' on '%s'...\n\n", action, resource)
+	fmt.Fprintf(logOutput, "Querying who can perform '%s' on '%s'...\n\n", action, resource)
 
 	// Query the graph
 	engine := query.New(g)
@@ -234,22 +256,23 @@ func runWhoCan(resource, action string) error {
 		return fmt.Errorf("query failed: %w", err)
 	}
 
-	if len(principals) == 0 {
-		fmt.Println("No principals found with access to this resource.")
-		return nil
-	}
-
-	fmt.Printf("Found %d principal(s) with access:\n\n", len(principals))
-	for _, p := range principals {
-		fmt.Printf("  %s (%s)\n", p.Name, p.Type)
-		fmt.Printf("    ARN: %s\n\n", p.ARN)
-	}
-
-	return nil
+	// Print results using output formatter
+	return output.PrintWhoCan(format, resource, action, principals)
 }
 
 func runPath(from, to, action string) error {
+	// Validate format
+	if format != "text" && format != "json" {
+		return fmt.Errorf("invalid format: %s (must be 'text' or 'json')", format)
+	}
+
 	ctx := context.Background()
+
+	// Send progress messages to stderr when using JSON format
+	logOutput := os.Stdout
+	if format == "json" {
+		logOutput = os.Stderr
+	}
 
 	// Collect data
 	col, err := collector.New(ctx, region, profile, debug)
@@ -257,19 +280,19 @@ func runPath(from, to, action string) error {
 		return fmt.Errorf("failed to create collector: %w", err)
 	}
 
-	fmt.Println("Collecting AWS data...")
+	fmt.Fprintln(logOutput, "Collecting AWS data...")
 	result, err := col.Collect(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to collect data: %w", err)
 	}
 
-	fmt.Println("Building access graph...")
+	fmt.Fprintln(logOutput, "Building access graph...")
 	g, err := graph.Build(result)
 	if err != nil {
 		return fmt.Errorf("failed to build graph: %w", err)
 	}
 
-	fmt.Printf("Finding paths from '%s' to '%s' for action '%s'...\n\n", from, to, action)
+	fmt.Fprintf(logOutput, "Finding paths from '%s' to '%s' for action '%s'...\n\n", from, to, action)
 
 	// Query the graph
 	engine := query.New(g)
@@ -278,50 +301,42 @@ func runPath(from, to, action string) error {
 		return fmt.Errorf("query failed: %w", err)
 	}
 
-	if len(paths) == 0 {
-		fmt.Println("No access paths found.")
-		return nil
-	}
-
-	fmt.Printf("Found %d path(s):\n\n", len(paths))
-	for i, path := range paths {
-		fmt.Printf("Path %d:\n", i+1)
-		for j, hop := range path.Hops {
-			fmt.Printf("  %d. %s -[%s]-> %v\n", j+1, hop.From.Name, hop.Action, hop.To)
-		}
-		if len(path.Conditions) > 0 {
-			fmt.Println("  Conditions:")
-			for _, cond := range path.Conditions {
-				fmt.Printf("    - %s\n", cond)
-			}
-		}
-		fmt.Println()
-	}
-
-	return nil
+	// Print results using output formatter
+	return output.PrintPaths(format, from, to, action, paths)
 }
 
 func runReport(account string, highRisk bool) error {
+	// Validate format
+	if format != "text" && format != "json" {
+		return fmt.Errorf("invalid format: %s (must be 'text' or 'json')", format)
+	}
+
 	ctx := context.Background()
+
+	// Send progress messages to stderr when using JSON format
+	logOutput := os.Stdout
+	if format == "json" {
+		logOutput = os.Stderr
+	}
 
 	col, err := collector.New(ctx, region, profile, debug)
 	if err != nil {
 		return fmt.Errorf("failed to create collector: %w", err)
 	}
 
-	fmt.Println("Collecting AWS data...")
+	fmt.Fprintln(logOutput, "Collecting AWS data...")
 	result, err := col.Collect(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to collect data: %w", err)
 	}
 
-	fmt.Println("Building access graph...")
+	fmt.Fprintln(logOutput, "Building access graph...")
 	g, err := graph.Build(result)
 	if err != nil {
 		return fmt.Errorf("failed to build graph: %w", err)
 	}
 
-	fmt.Println("Analyzing for high-risk patterns...")
+	fmt.Fprintln(logOutput, "Analyzing for high-risk patterns...")
 
 	engine := query.New(g)
 	findings, err := engine.FindHighRiskAccess()
@@ -329,16 +344,17 @@ func runReport(account string, highRisk bool) error {
 		return fmt.Errorf("analysis failed: %w", err)
 	}
 
-	if len(findings) == 0 {
-		fmt.Println("No high-risk findings detected.")
-		return nil
+	// Filter to only high-risk if flag is set
+	if highRisk {
+		filtered := make([]query.HighRiskFinding, 0)
+		for _, f := range findings {
+			if f.Severity == "CRITICAL" || f.Severity == "HIGH" {
+				filtered = append(filtered, f)
+			}
+		}
+		findings = filtered
 	}
 
-	fmt.Printf("Found %d high-risk finding(s):\n\n", len(findings))
-	for i, finding := range findings {
-		fmt.Printf("%d. [%s] %s\n", i+1, finding.Severity, finding.Type)
-		fmt.Printf("   %s\n\n", finding.Description)
-	}
-
-	return nil
+	// Print results using output formatter
+	return output.PrintReport(format, result.AccountID, findings)
 }

@@ -3,19 +3,30 @@ package collector
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
+	"github.com/aws/aws-sdk-go-v2/service/kms"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
+	"github.com/aws/aws-sdk-go-v2/service/sns"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/pfrederiksen/aws-access-map/internal/policy"
 	"github.com/pfrederiksen/aws-access-map/pkg/types"
 )
 
 // Collector handles fetching data from AWS APIs
 type Collector struct {
-	iamClient *iam.Client
-	region    string
-	profile   string
-	debug     bool
+	iamClient            *iam.Client
+	s3Client             *s3.Client
+	kmsClient            *kms.Client
+	sqsClient            *sqs.Client
+	snsClient            *sns.Client
+	secretsManagerClient *secretsmanager.Client
+	region               string
+	profile              string
+	debug                bool
 }
 
 // New creates a new Collector instance
@@ -38,17 +49,23 @@ func New(ctx context.Context, region, profile string, debug bool) (*Collector, e
 	}
 
 	return &Collector{
-		iamClient: iam.NewFromConfig(cfg),
-		region:    region,
-		profile:   profile,
-		debug:     debug,
+		iamClient:            iam.NewFromConfig(cfg),
+		s3Client:             s3.NewFromConfig(cfg),
+		kmsClient:            kms.NewFromConfig(cfg),
+		sqsClient:            sqs.NewFromConfig(cfg),
+		snsClient:            sns.NewFromConfig(cfg),
+		secretsManagerClient: secretsmanager.NewFromConfig(cfg),
+		region:               region,
+		profile:              profile,
+		debug:                debug,
 	}, nil
 }
 
 // Collect fetches all relevant AWS data
 func (c *Collector) Collect(ctx context.Context) (*types.CollectionResult, error) {
 	result := &types.CollectionResult{
-		Regions: []string{c.region},
+		Regions:     []string{c.region},
+		CollectedAt: time.Now(),
 	}
 
 	// Get account ID
@@ -72,7 +89,42 @@ func (c *Collector) Collect(ctx context.Context) (*types.CollectionResult, error
 	}
 	result.Principals = append(result.Principals, roles...)
 
-	// TODO: Collect groups, resource policies, SCPs, etc.
+	// Collect S3 resources
+	s3Resources, err := c.collectS3Resources(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to collect S3 resources: %w", err)
+	}
+	result.Resources = append(result.Resources, s3Resources...)
+
+	// Collect KMS resources
+	kmsResources, err := c.collectKMSResources(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to collect KMS resources: %w", err)
+	}
+	result.Resources = append(result.Resources, kmsResources...)
+
+	// Collect SQS resources
+	sqsResources, err := c.collectSQSResources(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to collect SQS resources: %w", err)
+	}
+	result.Resources = append(result.Resources, sqsResources...)
+
+	// Collect SNS resources
+	snsResources, err := c.collectSNSResources(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to collect SNS resources: %w", err)
+	}
+	result.Resources = append(result.Resources, snsResources...)
+
+	// Collect Secrets Manager resources
+	secretsResources, err := c.collectSecretsManagerResources(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to collect Secrets Manager resources: %w", err)
+	}
+	result.Resources = append(result.Resources, secretsResources...)
+
+	// TODO: Collect groups, SCPs, etc.
 
 	return result, nil
 }

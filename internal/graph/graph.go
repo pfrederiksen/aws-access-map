@@ -65,7 +65,12 @@ func Build(collection *types.CollectionResult) (*Graph, error) {
 	for _, resource := range collection.Resources {
 		g.AddResource(resource)
 
-		// TODO: Process resource policies
+		// Process resource policies
+		if resource.ResourcePolicy != nil {
+			if err := g.addResourcePolicyEdges(resource.ARN, *resource.ResourcePolicy); err != nil {
+				return nil, fmt.Errorf("failed to process resource policy for %s: %w", resource.ARN, err)
+			}
+		}
 	}
 
 	return g, nil
@@ -137,6 +142,18 @@ func (g *Graph) GetAllPrincipals() []*types.Principal {
 		principals = append(principals, p)
 	}
 	return principals
+}
+
+// GetAllResources returns all resources in the graph
+func (g *Graph) GetAllResources() []*types.Resource {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	resources := make([]*types.Resource, 0, len(g.resources))
+	for _, r := range g.resources {
+		resources = append(resources, r)
+	}
+	return resources
 }
 
 // CanAccess checks if a principal can perform an action on a resource
@@ -212,6 +229,39 @@ func (g *Graph) addTrustEdges(roleARN string, trustPolicy types.PolicyDocument) 
 		principals := extractPrincipals(stmt.Principal)
 		for _, principal := range principals {
 			g.AddTrustRelation(roleARN, principal)
+		}
+	}
+	return nil
+}
+
+// addResourcePolicyEdges processes a resource policy and adds edges
+func (g *Graph) addResourcePolicyEdges(resourceARN string, policy types.PolicyDocument) error {
+	for _, stmt := range policy.Statements {
+		// Extract principals allowed/denied by this resource policy
+		principals := extractPrincipals(stmt.Principal)
+		actions := normalizeToSlice(stmt.Action)
+
+		isDeny := stmt.Effect == types.EffectDeny
+
+		for _, principalARN := range principals {
+			// Handle wildcard principals (public access)
+			if principalARN == "*" || principalARN == "arn:aws:iam::*:root" {
+				// Ensure public principal exists in graph
+				if _, ok := g.GetPrincipal("*"); !ok {
+					publicPrincipal := &types.Principal{
+						ARN:  "*",
+						Type: types.PrincipalTypePublic,
+						Name: "Public (Anonymous)",
+					}
+					g.AddPrincipal(publicPrincipal)
+				}
+				principalARN = "*"
+			}
+
+			// Add edge from principal to resource for each action
+			for _, action := range actions {
+				g.AddEdge(principalARN, action, resourceARN, isDeny)
+			}
 		}
 	}
 	return nil

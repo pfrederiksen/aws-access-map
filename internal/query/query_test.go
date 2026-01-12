@@ -237,32 +237,110 @@ func TestFindPaths_PrincipalNotFound(t *testing.T) {
 	}
 }
 
-func TestFindPublicAccess(t *testing.T) {
+func TestFindHighRiskAccess_AdminUser(t *testing.T) {
 	g := graph.New()
-	e := New(g)
 
-	resources, err := e.FindPublicAccess()
-	if err != nil {
-		t.Fatalf("FindPublicAccess() error = %v", err)
+	// Add admin user with wildcard permissions
+	admin := &types.Principal{
+		ARN:       "arn:aws:iam::123456789012:user/admin",
+		Type:      types.PrincipalTypeUser,
+		Name:      "admin",
+		AccountID: "123456789012",
 	}
+	g.AddPrincipal(admin)
+	g.AddEdge(admin.ARN, "*", "*", false)
 
-	// Currently not implemented, should return empty slice
-	if resources == nil {
-		t.Error("FindPublicAccess() should return empty slice, not nil")
-	}
-}
-
-func TestFindHighRiskAccess(t *testing.T) {
-	g := graph.New()
 	e := New(g)
-
 	findings, err := e.FindHighRiskAccess()
+
 	if err != nil {
 		t.Fatalf("FindHighRiskAccess() error = %v", err)
 	}
 
-	// Currently not implemented, should return empty slice
-	if findings == nil {
-		t.Error("FindHighRiskAccess() should return empty slice, not nil")
+	if len(findings) == 0 {
+		t.Fatal("Expected to find admin access risk")
+	}
+
+	found := false
+	for _, f := range findings {
+		if f.Type == "Admin Access" && f.Severity == "CRITICAL" {
+			found = true
+			if f.Principal == nil || f.Principal.Name != "admin" {
+				t.Error("Expected finding to reference admin principal")
+			}
+			break
+		}
+	}
+
+	if !found {
+		t.Error("Did not find CRITICAL admin access finding")
+	}
+}
+
+func TestFindHighRiskAccess_PublicS3Bucket(t *testing.T) {
+	g := graph.New()
+
+	// Create public principal
+	publicPrincipal := &types.Principal{
+		ARN:  "*",
+		Type: types.PrincipalTypePublic,
+		Name: "Public (Anonymous)",
+	}
+	g.AddPrincipal(publicPrincipal)
+
+	// Create S3 bucket with public access
+	bucket := &types.Resource{
+		ARN:  "arn:aws:s3:::public-bucket",
+		Type: types.ResourceTypeS3,
+		Name: "public-bucket",
+	}
+	g.AddResource(bucket)
+	g.AddEdge(publicPrincipal.ARN, "s3:GetObject", bucket.ARN, false)
+
+	e := New(g)
+	findings, err := e.FindHighRiskAccess()
+
+	if err != nil {
+		t.Fatalf("FindHighRiskAccess() error = %v", err)
+	}
+
+	found := false
+	for _, f := range findings {
+		if f.Type == "Public Access" && f.Resource != nil && f.Resource.Name == "public-bucket" {
+			found = true
+			if f.Severity != "CRITICAL" && f.Severity != "HIGH" {
+				t.Errorf("Expected CRITICAL or HIGH severity for public S3, got %s", f.Severity)
+			}
+			break
+		}
+	}
+
+	if !found {
+		t.Error("Did not find public S3 bucket finding")
+	}
+}
+
+func TestFindHighRiskAccess_NoFindings(t *testing.T) {
+	g := graph.New()
+
+	// Add a regular user with limited permissions
+	user := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:user/readonly",
+		Type: types.PrincipalTypeUser,
+		Name: "readonly",
+	}
+	g.AddPrincipal(user)
+	g.AddEdge(user.ARN, "s3:GetObject", "arn:aws:s3:::specific-bucket/*", false)
+
+	e := New(g)
+	findings, err := e.FindHighRiskAccess()
+
+	if err != nil {
+		t.Fatalf("FindHighRiskAccess() error = %v", err)
+	}
+
+	// Should have no high-risk findings for a limited read-only user
+	if len(findings) > 0 {
+		t.Errorf("Expected no high-risk findings for limited user, got %d", len(findings))
 	}
 }
