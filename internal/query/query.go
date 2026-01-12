@@ -72,29 +72,6 @@ func (e *Engine) FindPaths(fromPrincipalARN, toResourceARN, action string) ([]*t
 	return paths, nil
 }
 
-// FindPublicAccess identifies resources with public access
-func (e *Engine) FindPublicAccess() ([]*types.Resource, error) {
-	publicResources := make([]*types.Resource, 0)
-
-	// TODO: Check for resources with policies allowing public access
-	// Look for principals like "*" or "arn:aws:iam::*:root"
-
-	return publicResources, nil
-}
-
-// FindHighRiskAccess identifies high-risk access patterns
-func (e *Engine) FindHighRiskAccess() ([]HighRiskFinding, error) {
-	findings := make([]HighRiskFinding, 0)
-
-	// TODO: Implement risk detection
-	// - Public access to sensitive resources
-	// - Overly permissive policies (Action: "*", Resource: "*")
-	// - Cross-account access
-	// - Long role assumption chains
-
-	return findings, nil
-}
-
 // HighRiskFinding represents a high-risk access pattern
 type HighRiskFinding struct {
 	Type        string
