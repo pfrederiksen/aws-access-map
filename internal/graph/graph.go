@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/pfrederiksen/aws-access-map/internal/policy"
 	"github.com/pfrederiksen/aws-access-map/pkg/types"
 )
 
@@ -144,19 +145,30 @@ func (g *Graph) CanAccess(principalARN, action, resourceARN string) bool {
 	defer g.mu.RUnlock()
 
 	// Check for explicit deny first (deny always wins)
-	if deniedResources, ok := g.denies[principalARN][action]; ok {
-		for _, denied := range deniedResources {
-			if matchesPattern(denied, resourceARN) {
-				return false
+	// Need to check all action patterns, not just exact match
+	if actionMap, ok := g.denies[principalARN]; ok {
+		for actionPattern, deniedResources := range actionMap {
+			// Check if the action pattern matches the queried action
+			if policy.MatchesAction(actionPattern, action) {
+				for _, denied := range deniedResources {
+					if matchesPattern(denied, resourceARN) {
+						return false
+					}
+				}
 			}
 		}
 	}
 
-	// Check for allow
-	if allowedResources, ok := g.principalActions[principalARN][action]; ok {
-		for _, allowed := range allowedResources {
-			if matchesPattern(allowed, resourceARN) {
-				return true
+	// Check for allow - also need to check action patterns
+	if actionMap, ok := g.principalActions[principalARN]; ok {
+		for actionPattern, allowedResources := range actionMap {
+			// Check if the action pattern matches the queried action
+			if policy.MatchesAction(actionPattern, action) {
+				for _, allowed := range allowedResources {
+					if matchesPattern(allowed, resourceARN) {
+						return true
+					}
+				}
 			}
 		}
 	}
@@ -244,10 +256,5 @@ func extractPrincipals(principal interface{}) []string {
 
 // matchesPattern checks if a resource ARN matches a pattern (with wildcards)
 func matchesPattern(pattern, arn string) bool {
-	// Simplified matching for MVP
-	// TODO: Implement proper wildcard matching
-	if pattern == "*" {
-		return true
-	}
-	return pattern == arn
+	return policy.MatchesResource(pattern, arn)
 }

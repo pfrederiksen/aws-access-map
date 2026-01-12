@@ -191,7 +191,7 @@ aws-access-map who-can "arn:aws:kms:us-east-1:*:key/*" --action "kms:Decrypt"
 
 **Current behavior:**
 - ✅ Queries identity-based policies (IAM users/roles)
-- ⚠️  Wildcard matching is simplified (exact match or `*` suffix only)
+- ✅ Full wildcard matching (supports `*`, `s3:Get*`, `iam:*User*`, etc.)
 - ⏳ Resource-based policies not yet supported
 - ⏳ Condition evaluation not yet supported
 
@@ -268,7 +268,7 @@ aws-access-map report --high-risk
 - Handle basic wildcards (`*` and simple prefixes like `s3:Get*`)
 
 **⚠️  Limitations (MVP)**
-- Wildcard matching is simplified (only exact or `*` suffix)
+- ✅ Full wildcard matching implemented (glob patterns)
 - Policy conditions are not evaluated
 - No resource-based policies yet (S3, KMS, etc.)
 - Role assumption chains not traversed

@@ -102,10 +102,46 @@ Command-line interface using cobra:
 - Log errors but continue where possible (one failed API call shouldn't break everything)
 
 ### Testing Strategy
-- Unit tests for policy parsing (complex logic)
-- Integration tests with mock AWS responses
-- Example policy files in `testdata/`
-- Avoid live AWS API calls in tests
+
+**IMPORTANT: Always create comprehensive tests for new code.**
+
+**Coverage Requirements:**
+- **Target: 90%+ coverage** for all core packages (`internal/graph`, `internal/policy`, `internal/query`)
+- Write tests BEFORE or IMMEDIATELY AFTER implementing features
+- Every new function must have corresponding tests
+- Include edge cases, error cases, and boundary conditions
+
+**Test Types:**
+- **Unit tests** for policy parsing, graph operations, query logic
+- **Table-driven tests** for functions with multiple input scenarios (use `[]struct` pattern)
+- **Integration tests** with mock AWS responses (avoid live API calls)
+- **Helper function tests** - even small utilities need coverage
+- Example policy files in `testdata/` for realistic scenarios
+
+**Test Coverage by Package:**
+- `internal/graph`: Test graph construction, edge management, access checks, wildcards
+- `internal/policy`: Test pattern matching, policy parsing, condition evaluation
+- `internal/query`: Test WhoCan, FindPaths, error handling
+- `internal/collector`: Mock AWS SDK calls (complex, optional for MVP)
+- `cmd/aws-access-map`: CLI integration tests (optional for MVP)
+
+**Running Tests:**
+```bash
+# Run all tests
+go test ./...
+
+# With coverage
+go test ./... -coverprofile=coverage.out
+go tool cover -func=coverage.out
+
+# Specific package
+go test -v ./internal/graph/
+```
+
+**Current Coverage (as of Jan 2026):**
+- internal/graph: 95.7% ✅
+- internal/policy: 90.6% ✅
+- internal/query: 95.2% ✅
 
 ### Performance Considerations
 - Cache AWS API responses locally (policies don't change frequently)

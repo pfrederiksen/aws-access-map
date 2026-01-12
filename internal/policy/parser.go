@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strings"
 
+	"github.com/gobwas/glob"
 	"github.com/pfrederiksen/aws-access-map/pkg/types"
 )
 
@@ -26,37 +28,53 @@ func Parse(policyDoc string) (*types.PolicyDocument, error) {
 }
 
 // MatchesAction checks if an action pattern matches a specific action
+// Supports AWS IAM action wildcards: *, s3:*, s3:Get*, iam:*User*, etc.
 func MatchesAction(pattern, action string) bool {
-	// Simple wildcard matching for MVP
-	// TODO: Implement full wildcard matching (s3:Get*, s3:*)
-	if pattern == "*" || pattern == action {
+	// Exact match (most common case)
+	if pattern == action {
 		return true
 	}
 
-	// Basic prefix matching for patterns like "s3:Get*"
-	if len(pattern) > 0 && pattern[len(pattern)-1] == '*' {
-		prefix := pattern[:len(pattern)-1]
-		return len(action) >= len(prefix) && action[:len(prefix)] == prefix
+	// Universal wildcard
+	if pattern == "*" {
+		return true
 	}
 
-	return false
+	// AWS uses case-sensitive action matching, but normalize for consistency
+	pattern = strings.ToLower(pattern)
+	action = strings.ToLower(action)
+
+	// Compile glob pattern (gobwas/glob handles *, ?, [...], etc.)
+	g, err := glob.Compile(pattern)
+	if err != nil {
+		// If pattern is invalid, fall back to exact match
+		return pattern == action
+	}
+
+	return g.Match(action)
 }
 
 // MatchesResource checks if a resource pattern matches a specific resource ARN
+// Supports AWS ARN wildcards: *, arn:aws:s3:::bucket/*, arn:aws:iam::*:role/*, etc.
 func MatchesResource(pattern, arn string) bool {
-	// Simple wildcard matching for MVP
-	// TODO: Implement full ARN wildcard matching
-	if pattern == "*" || pattern == arn {
+	// Exact match (most common case)
+	if pattern == arn {
 		return true
 	}
 
-	// Basic suffix matching for patterns like "arn:aws:s3:::bucket/*"
-	if len(pattern) > 0 && pattern[len(pattern)-1] == '*' {
-		prefix := pattern[:len(pattern)-1]
-		return len(arn) >= len(prefix) && arn[:len(prefix)] == prefix
+	// Universal wildcard
+	if pattern == "*" {
+		return true
 	}
 
-	return false
+	// Compile glob pattern for ARN matching
+	g, err := glob.Compile(pattern)
+	if err != nil {
+		// If pattern is invalid, fall back to exact match
+		return pattern == arn
+	}
+
+	return g.Match(arn)
 }
 
 // EvaluateCondition evaluates a policy condition

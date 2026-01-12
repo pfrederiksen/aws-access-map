@@ -36,15 +36,16 @@ func (e *Engine) WhoCan(resourceARN, action string) ([]*types.Principal, error) 
 
 // FindPaths finds all access paths from a principal to a resource
 func (e *Engine) FindPaths(fromPrincipalARN, toResourceARN, action string) ([]*types.AccessPath, error) {
+	// Validate principal exists first
+	principal, ok := e.graph.GetPrincipal(fromPrincipalARN)
+	if !ok {
+		return nil, fmt.Errorf("principal not found: %s", fromPrincipalARN)
+	}
+
 	var paths []*types.AccessPath
 
 	// Check direct access
 	if e.graph.CanAccess(fromPrincipalARN, action, toResourceARN) {
-		principal, ok := e.graph.GetPrincipal(fromPrincipalARN)
-		if !ok {
-			return nil, fmt.Errorf("principal not found: %s", fromPrincipalARN)
-		}
-
 		resource, ok := e.graph.GetResource(toResourceARN)
 		if !ok {
 			return nil, fmt.Errorf("resource not found: %s", toResourceARN)
@@ -73,7 +74,7 @@ func (e *Engine) FindPaths(fromPrincipalARN, toResourceARN, action string) ([]*t
 
 // FindPublicAccess identifies resources with public access
 func (e *Engine) FindPublicAccess() ([]*types.Resource, error) {
-	var publicResources []*types.Resource
+	publicResources := make([]*types.Resource, 0)
 
 	// TODO: Check for resources with policies allowing public access
 	// Look for principals like "*" or "arn:aws:iam::*:root"
@@ -83,7 +84,7 @@ func (e *Engine) FindPublicAccess() ([]*types.Resource, error) {
 
 // FindHighRiskAccess identifies high-risk access patterns
 func (e *Engine) FindHighRiskAccess() ([]HighRiskFinding, error) {
-	var findings []HighRiskFinding
+	findings := make([]HighRiskFinding, 0)
 
 	// TODO: Implement risk detection
 	// - Public access to sensitive resources
