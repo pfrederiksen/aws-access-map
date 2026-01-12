@@ -1,5 +1,5 @@
 # Binaries
-aws-access-map
+/aws-access-map
 *.exe
 *.exe~
 *.dll
@@ -35,5 +35,4 @@ Thumbs.db
 *.db
 
 # Local planning files
-ROADMAP.md
 SOCIAL_POSTS.md
