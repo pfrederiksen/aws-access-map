@@ -33,3 +33,7 @@ Thumbs.db
 # Cache
 .cache/
 *.db
+
+# Local planning files
+ROADMAP.md
+SOCIAL_POSTS.md
