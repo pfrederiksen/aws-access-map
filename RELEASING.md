@@ -1,36 +1,54 @@
 # Release Process
 
-## Automated Releases
+## Automated Version Bumping
 
-Releases are automated using GitHub Actions and GoReleaser. When you push a version tag, the workflow automatically:
+The easiest way to release is using automated version bumping. Choose your method:
 
-1. Runs all tests
-2. Builds binaries for all platforms (Linux, macOS, Windows)
-3. Creates archives (.tar.gz, .zip)
-4. Generates checksums
-5. Creates a GitHub release with release notes
-6. Uploads all assets
+### Method 1: GitHub Actions (Recommended)
 
-## How to Release
+Trigger a release from GitHub UI or CLI:
 
-### 1. Update Version in Code (if applicable)
+**Via GitHub UI:**
+1. Go to [Actions](https://github.com/pfrederiksen/aws-access-map/actions/workflows/bump-version.yml)
+2. Click "Run workflow"
+3. Select version bump: **patch** (0.1.0 → 0.1.1), **minor** (0.1.0 → 0.2.0), or **major** (0.1.0 → 1.0.0)
+4. Click "Run workflow"
 
-If you have version constants in your code, update them:
+**Via GitHub CLI:**
+```bash
+# Patch release (bug fixes)
+gh workflow run bump-version.yml -f bump_type=patch
 
-```go
-// cmd/aws-access-map/main.go
-var version = "0.2.0"
+# Minor release (new features)
+gh workflow run bump-version.yml -f bump_type=minor
+
+# Major release (breaking changes)
+gh workflow run bump-version.yml -f bump_type=major
 ```
 
-### 2. Commit Changes
+### Method 2: Local Script
+
+Use the included release script:
 
 ```bash
-git add .
-git commit -m "chore: prepare for v0.2.0 release"
-git push
+# Interactive - prompts for version type
+./scripts/release.sh
+
+# Or specify version type directly
+./scripts/release.sh patch   # 0.1.0 → 0.1.1
+./scripts/release.sh minor   # 0.1.0 → 0.2.0
+./scripts/release.sh major   # 0.1.0 → 1.0.0
 ```
 
-### 3. Create and Push Tag
+The script will:
+- Show current and new version
+- Ask for confirmation
+- Create and push the tag
+- Trigger the automated release
+
+### Method 3: Manual Tag Creation
+
+If you prefer manual control:
 
 ```bash
 # Create annotated tag
@@ -40,9 +58,20 @@ git tag -a v0.2.0 -m "Release v0.2.0"
 git push origin v0.2.0
 ```
 
-That's it! GitHub Actions will handle the rest.
+## What Happens Next
 
-### 4. Monitor Release
+Once the version tag is pushed (by any method above), GitHub Actions automatically:
+
+1. Runs all tests
+2. Builds binaries for all platforms (Linux, macOS, Windows)
+3. Creates archives (.tar.gz, .zip)
+4. Generates checksums
+5. Creates a GitHub release with release notes
+6. Uploads all assets
+
+That's it! No manual building required.
+
+## Monitor Release Progress
 
 Watch the workflow progress:
 ```bash
@@ -53,7 +82,7 @@ gh run list --workflow=release.yml
 open https://github.com/pfrederiksen/aws-access-map/actions
 ```
 
-### 5. Edit Release Notes (Optional)
+## Edit Release Notes (Optional)
 
 After the automated release is created, you can enhance the release notes:
 
