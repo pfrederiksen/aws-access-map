@@ -97,7 +97,7 @@ func whoCanCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&action, "action", "", "AWS action to check (e.g., s3:GetObject)")
-	cmd.MarkFlagRequired("action")
+	_ = cmd.MarkFlagRequired("action")
 
 	return cmd
 }
@@ -131,9 +131,9 @@ Role assumption chains and transitive access are not yet implemented.`,
 	cmd.Flags().StringVar(&from, "from", "", "Source principal ARN")
 	cmd.Flags().StringVar(&to, "to", "", "Target resource ARN or identifier")
 	cmd.Flags().StringVar(&action, "action", "", "AWS action to check")
-	cmd.MarkFlagRequired("from")
-	cmd.MarkFlagRequired("to")
-	cmd.MarkFlagRequired("action")
+	_ = cmd.MarkFlagRequired("from")
+	_ = cmd.MarkFlagRequired("to")
+	_ = cmd.MarkFlagRequired("action")
 
 	return cmd
 }
