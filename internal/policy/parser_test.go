@@ -198,3 +198,269 @@ func TestEvaluateCondition(t *testing.T) {
 		})
 	}
 }
+
+func TestMatchesNotAction(t *testing.T) {
+	tests := []struct {
+		name              string
+		notActionPatterns []string
+		action            string
+		want              bool
+	}{
+		// Empty NotAction - all actions allowed
+		{
+			name:              "Empty NotAction patterns",
+			notActionPatterns: []string{},
+			action:            "s3:GetObject",
+			want:              true,
+		},
+		{
+			name:              "Nil NotAction patterns",
+			notActionPatterns: nil,
+			action:            "s3:GetObject",
+			want:              true,
+		},
+
+		// Single exact exclusion
+		{
+			name:              "Exclude exact action - match",
+			notActionPatterns: []string{"s3:DeleteObject"},
+			action:            "s3:DeleteObject",
+			want:              false, // Action is excluded
+		},
+		{
+			name:              "Exclude exact action - no match",
+			notActionPatterns: []string{"s3:DeleteObject"},
+			action:            "s3:GetObject",
+			want:              true, // Action is NOT excluded
+		},
+
+		// Wildcard exclusions
+		{
+			name:              "Exclude s3:Delete* - DeleteObject excluded",
+			notActionPatterns: []string{"s3:Delete*"},
+			action:            "s3:DeleteObject",
+			want:              false,
+		},
+		{
+			name:              "Exclude s3:Delete* - GetObject allowed",
+			notActionPatterns: []string{"s3:Delete*"},
+			action:            "s3:GetObject",
+			want:              true,
+		},
+		{
+			name:              "Exclude s3:* - all s3 excluded",
+			notActionPatterns: []string{"s3:*"},
+			action:            "s3:GetObject",
+			want:              false,
+		},
+		{
+			name:              "Exclude s3:* - iam actions allowed",
+			notActionPatterns: []string{"s3:*"},
+			action:            "iam:CreateUser",
+			want:              true,
+		},
+
+		// Multiple exclusions
+		{
+			name:              "Multiple patterns - first matches",
+			notActionPatterns: []string{"s3:Delete*", "s3:Put*"},
+			action:            "s3:DeleteObject",
+			want:              false,
+		},
+		{
+			name:              "Multiple patterns - second matches",
+			notActionPatterns: []string{"s3:Delete*", "s3:Put*"},
+			action:            "s3:PutObject",
+			want:              false,
+		},
+		{
+			name:              "Multiple patterns - no match",
+			notActionPatterns: []string{"s3:Delete*", "s3:Put*"},
+			action:            "s3:GetObject",
+			want:              true,
+		},
+
+		// Common AWS pattern: allow all except specific actions
+		{
+			name:              "Allow all except iam:* - s3 allowed",
+			notActionPatterns: []string{"iam:*"},
+			action:            "s3:GetObject",
+			want:              true,
+		},
+		{
+			name:              "Allow all except iam:* - iam excluded",
+			notActionPatterns: []string{"iam:*"},
+			action:            "iam:CreateUser",
+			want:              false,
+		},
+
+		// Universal wildcard exclusion (allow nothing)
+		{
+			name:              "Exclude * - nothing allowed",
+			notActionPatterns: []string{"*"},
+			action:            "s3:GetObject",
+			want:              false,
+		},
+
+		// Complex patterns
+		{
+			name:              "Exclude iam:*User* - CreateUser excluded",
+			notActionPatterns: []string{"iam:*User*"},
+			action:            "iam:CreateUser",
+			want:              false,
+		},
+		{
+			name:              "Exclude iam:*User* - GetUserPolicy excluded",
+			notActionPatterns: []string{"iam:*User*"},
+			action:            "iam:GetUserPolicy",
+			want:              false,
+		},
+		{
+			name:              "Exclude iam:*User* - CreateRole allowed",
+			notActionPatterns: []string{"iam:*User*"},
+			action:            "iam:CreateRole",
+			want:              true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := MatchesNotAction(tt.notActionPatterns, tt.action)
+			if got != tt.want {
+				t.Errorf("MatchesNotAction(%v, %q) = %v, want %v",
+					tt.notActionPatterns, tt.action, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMatchesNotResource(t *testing.T) {
+	tests := []struct {
+		name                 string
+		notResourcePatterns  []string
+		arn                  string
+		want                 bool
+	}{
+		// Empty NotResource - all resources allowed
+		{
+			name:                "Empty NotResource patterns",
+			notResourcePatterns: []string{},
+			arn:                 "arn:aws:s3:::bucket/key",
+			want:                true,
+		},
+		{
+			name:                "Nil NotResource patterns",
+			notResourcePatterns: nil,
+			arn:                 "arn:aws:s3:::bucket/key",
+			want:                true,
+		},
+
+		// Single exact exclusion
+		{
+			name:                "Exclude exact ARN - match",
+			notResourcePatterns: []string{"arn:aws:s3:::production-bucket/*"},
+			arn:                 "arn:aws:s3:::production-bucket/file.txt",
+			want:                false, // Resource is excluded
+		},
+		{
+			name:                "Exclude exact ARN - no match",
+			notResourcePatterns: []string{"arn:aws:s3:::production-bucket/*"},
+			arn:                 "arn:aws:s3:::dev-bucket/file.txt",
+			want:                true, // Resource is NOT excluded
+		},
+
+		// Wildcard exclusions
+		{
+			name:                "Exclude production-* - production excluded",
+			notResourcePatterns: []string{"arn:aws:s3:::production-*"},
+			arn:                 "arn:aws:s3:::production-data",
+			want:                false,
+		},
+		{
+			name:                "Exclude production-* - dev allowed",
+			notResourcePatterns: []string{"arn:aws:s3:::production-*"},
+			arn:                 "arn:aws:s3:::dev-data",
+			want:                true,
+		},
+
+		// Multiple exclusions
+		{
+			name:                "Multiple patterns - first matches",
+			notResourcePatterns: []string{"arn:aws:s3:::production-*", "arn:aws:s3:::sensitive-*"},
+			arn:                 "arn:aws:s3:::production-bucket",
+			want:                false,
+		},
+		{
+			name:                "Multiple patterns - second matches",
+			notResourcePatterns: []string{"arn:aws:s3:::production-*", "arn:aws:s3:::sensitive-*"},
+			arn:                 "arn:aws:s3:::sensitive-data",
+			want:                false,
+		},
+		{
+			name:                "Multiple patterns - no match",
+			notResourcePatterns: []string{"arn:aws:s3:::production-*", "arn:aws:s3:::sensitive-*"},
+			arn:                 "arn:aws:s3:::dev-bucket",
+			want:                true,
+		},
+
+		// Common AWS pattern: allow all resources except specific bucket
+		{
+			name:                "Allow all except sensitive bucket - other allowed",
+			notResourcePatterns: []string{"arn:aws:s3:::sensitive-bucket/*"},
+			arn:                 "arn:aws:s3:::public-bucket/file.txt",
+			want:                true,
+		},
+		{
+			name:                "Allow all except sensitive bucket - sensitive excluded",
+			notResourcePatterns: []string{"arn:aws:s3:::sensitive-bucket/*"},
+			arn:                 "arn:aws:s3:::sensitive-bucket/secret.txt",
+			want:                false,
+		},
+
+		// Universal wildcard exclusion (allow nothing)
+		{
+			name:                "Exclude * - nothing allowed",
+			notResourcePatterns: []string{"*"},
+			arn:                 "arn:aws:s3:::any-bucket/key",
+			want:                false,
+		},
+
+		// Complex ARN patterns
+		{
+			name:                "Exclude IAM roles - role excluded",
+			notResourcePatterns: []string{"arn:aws:iam::*:role/*"},
+			arn:                 "arn:aws:iam::123456789012:role/MyRole",
+			want:                false,
+		},
+		{
+			name:                "Exclude IAM roles - user allowed",
+			notResourcePatterns: []string{"arn:aws:iam::*:role/*"},
+			arn:                 "arn:aws:iam::123456789012:user/MyUser",
+			want:                true,
+		},
+
+		// Region-specific exclusions
+		{
+			name:                "Exclude us-east-1 KMS keys - us-east-1 excluded",
+			notResourcePatterns: []string{"arn:aws:kms:us-east-1:*:key/*"},
+			arn:                 "arn:aws:kms:us-east-1:123456789012:key/abc-123",
+			want:                false,
+		},
+		{
+			name:                "Exclude us-east-1 KMS keys - us-west-2 allowed",
+			notResourcePatterns: []string{"arn:aws:kms:us-east-1:*:key/*"},
+			arn:                 "arn:aws:kms:us-west-2:123456789012:key/abc-123",
+			want:                true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := MatchesNotResource(tt.notResourcePatterns, tt.arn)
+			if got != tt.want {
+				t.Errorf("MatchesNotResource(%v, %q) = %v, want %v",
+					tt.notResourcePatterns, tt.arn, got, tt.want)
+			}
+		})
+	}
+}

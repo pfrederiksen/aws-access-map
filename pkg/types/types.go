@@ -59,12 +59,14 @@ type PolicyDocument struct {
 
 // Statement represents a single statement in a policy document
 type Statement struct {
-	Sid       string                              `json:"Sid,omitempty"`
-	Effect    Effect                              `json:"Effect"`
-	Principal interface{}                         `json:"Principal,omitempty"` // Can be string, []string, or map[string]interface{}
-	Action    interface{}                         `json:"Action,omitempty"`    // Can be string or []string
-	Resource  interface{}                         `json:"Resource,omitempty"`  // Can be string or []string
-	Condition map[string]map[string]interface{} `json:"Condition,omitempty"`
+	Sid         string                              `json:"Sid,omitempty"`
+	Effect      Effect                              `json:"Effect"`
+	Principal   interface{}                         `json:"Principal,omitempty"`   // Can be string, []string, or map[string]interface{}
+	Action      interface{}                         `json:"Action,omitempty"`      // Can be string or []string
+	NotAction   interface{}                         `json:"NotAction,omitempty"`   // Can be string or []string - inverse of Action
+	Resource    interface{}                         `json:"Resource,omitempty"`    // Can be string or []string
+	NotResource interface{}                         `json:"NotResource,omitempty"` // Can be string or []string - inverse of Resource
+	Condition   map[string]map[string]interface{} `json:"Condition,omitempty"`
 }
 
 // Effect represents Allow or Deny

@@ -77,6 +77,36 @@ func MatchesResource(pattern, arn string) bool {
 	return g.Match(arn)
 }
 
+// MatchesNotAction checks if an action is NOT excluded by NotAction patterns
+// Returns true if the action should be included (not in the exclusion list)
+// Returns false if the action matches any NotAction pattern (should be excluded)
+func MatchesNotAction(notActionPatterns []string, action string) bool {
+	// For each pattern in NotAction:
+	//   If pattern matches action, return false (action is excluded)
+	// If no patterns match, return true (action is included)
+	for _, pattern := range notActionPatterns {
+		if MatchesAction(pattern, action) {
+			return false // Action is excluded by NotAction
+		}
+	}
+	return true // Action is not excluded
+}
+
+// MatchesNotResource checks if a resource is NOT excluded by NotResource patterns
+// Returns true if the resource should be included (not in the exclusion list)
+// Returns false if the resource matches any NotResource pattern (should be excluded)
+func MatchesNotResource(notResourcePatterns []string, arn string) bool {
+	// For each pattern in NotResource:
+	//   If pattern matches resource, return false (resource is excluded)
+	// If no patterns match, return true (resource is included)
+	for _, pattern := range notResourcePatterns {
+		if MatchesResource(pattern, arn) {
+			return false // Resource is excluded by NotResource
+		}
+	}
+	return true // Resource is not excluded
+}
+
 // EvaluateCondition evaluates a policy condition
 // For MVP, this just detects if conditions exist
 func EvaluateCondition(condition map[string]map[string]interface{}) (bool, []string) {

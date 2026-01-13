@@ -19,7 +19,7 @@ func TestCanAccessWithConditions_IPRestriction(t *testing.T) {
 			"aws:SourceIp": "203.0.113.0/24",
 		},
 	}
-	g.AddEdgeWithConditions(principalARN, action, resourceARN, false, ipCondition, "AllowFromOfficeIP")
+	g.AddEdgeWithConditions(principalARN, action, resourceARN, false, ipCondition, "AllowFromOfficeIP", nil, nil)
 
 	// Test 1: Access from allowed IP - should pass
 	ctxAllowed := &conditions.EvaluationContext{
@@ -55,7 +55,7 @@ func TestCanAccessWithConditions_MFARequired(t *testing.T) {
 			"aws:MultiFactorAuthPresent": true,
 		},
 	}
-	g.AddEdgeWithConditions(principalARN, action, resourceARN, false, mfaCondition, "RequireMFA")
+	g.AddEdgeWithConditions(principalARN, action, resourceARN, false, mfaCondition, "RequireMFA", nil, nil)
 
 	// Test 1: Access with MFA - should pass
 	ctxWithMFA := &conditions.EvaluationContext{
@@ -86,7 +86,7 @@ func TestCanAccessWithConditions_OrgIDRestriction(t *testing.T) {
 			"aws:PrincipalOrgID": "o-123456",
 		},
 	}
-	g.AddEdgeWithConditions(principalARN, action, resourceARN, false, orgCondition, "AllowFromOrg")
+	g.AddEdgeWithConditions(principalARN, action, resourceARN, false, orgCondition, "AllowFromOrg", nil, nil)
 
 	// Test 1: Access from correct org - should pass
 	ctxCorrectOrg := &conditions.EvaluationContext{
@@ -120,7 +120,7 @@ func TestCanAccessWithConditions_DenyWithCondition(t *testing.T) {
 			"aws:SourceIp": "203.0.113.0/24",
 		},
 	}
-	g.AddEdgeWithConditions(principalARN, action, resourceARN, true, denyCondition, "DenyProdFromNonOfficeIP")
+	g.AddEdgeWithConditions(principalARN, action, resourceARN, true, denyCondition, "DenyProdFromNonOfficeIP", nil, nil)
 
 	// Test 1: Access from office IP - should pass (deny condition doesn't match)
 	ctxOfficeIP := &conditions.EvaluationContext{
@@ -154,7 +154,7 @@ func TestCanAccessWithConditions_MultipleConditions(t *testing.T) {
 			"aws:MultiFactorAuthPresent": true,
 		},
 	}
-	g.AddEdgeWithConditions(principalARN, action, resourceARN, false, multiCondition, "RequireIPAndMFA")
+	g.AddEdgeWithConditions(principalARN, action, resourceARN, false, multiCondition, "RequireIPAndMFA", nil, nil)
 
 	// Test 1: Both conditions met - should pass
 	ctxBoth := &conditions.EvaluationContext{
