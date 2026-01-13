@@ -12,9 +12,11 @@ import (
 
 // PermissionEdge represents a permission edge with optional conditions
 type PermissionEdge struct {
-	ResourceARN string
-	Conditions  map[string]map[string]interface{} // AWS condition format
-	PolicyName  string                            // For debugging/display
+	ResourceARN         string
+	Conditions          map[string]map[string]interface{} // AWS condition format
+	PolicyName          string                            // For debugging/display
+	NotActionPatterns   []string                          // NotAction patterns from policy statement
+	NotResourcePatterns []string                          // NotResource patterns from policy statement
 }
 
 // Graph represents the access graph
@@ -114,18 +116,20 @@ func (g *Graph) AddResource(r *types.Resource) {
 // AddEdge adds a permission edge (principal can perform action on resource)
 // For backward compatibility, this creates an edge with no conditions
 func (g *Graph) AddEdge(principalARN, action, resourceARN string, isDeny bool) {
-	g.AddEdgeWithConditions(principalARN, action, resourceARN, isDeny, nil, "")
+	g.AddEdgeWithConditions(principalARN, action, resourceARN, isDeny, nil, "", nil, nil)
 }
 
 // AddEdgeWithConditions adds a permission edge with optional conditions
-func (g *Graph) AddEdgeWithConditions(principalARN, action, resourceARN string, isDeny bool, conditions map[string]map[string]interface{}, policyName string) {
+func (g *Graph) AddEdgeWithConditions(principalARN, action, resourceARN string, isDeny bool, conditions map[string]map[string]interface{}, policyName string, notActions, notResources []string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
 	edge := PermissionEdge{
-		ResourceARN: resourceARN,
-		Conditions:  conditions,
-		PolicyName:  policyName,
+		ResourceARN:         resourceARN,
+		Conditions:          conditions,
+		PolicyName:          policyName,
+		NotActionPatterns:   notActions,
+		NotResourcePatterns: notResources,
 	}
 
 	if isDeny {
@@ -228,7 +232,21 @@ func (g *Graph) CanAccess(principalARN, action, resourceARN string, ctx ...*cond
 			// Check if the action pattern matches the queried action
 			if policy.MatchesAction(actionPattern, action) {
 				for _, edge := range denyEdges {
+					// Check NotAction exclusion
+					if edge.NotActionPatterns != nil {
+						if !policy.MatchesNotAction(edge.NotActionPatterns, action) {
+							continue // Action is excluded by NotAction
+						}
+					}
+
 					if matchesPattern(edge.ResourceARN, resourceARN) {
+						// Check NotResource exclusion
+						if edge.NotResourcePatterns != nil {
+							if !policy.MatchesNotResource(edge.NotResourcePatterns, resourceARN) {
+								continue // Resource is excluded by NotResource
+							}
+						}
+
 						// Evaluate conditions
 						matched, err := conditions.Evaluate(edge.Conditions, evalCtx)
 						if err != nil {
@@ -258,7 +276,21 @@ func (g *Graph) CanAccess(principalARN, action, resourceARN string, ctx ...*cond
 					for actionPattern, denyEdges := range actionMap {
 						if policy.MatchesAction(actionPattern, action) {
 							for _, edge := range denyEdges {
+								// Check NotAction exclusion
+								if edge.NotActionPatterns != nil {
+									if !policy.MatchesNotAction(edge.NotActionPatterns, action) {
+										continue // Action is excluded by NotAction
+									}
+								}
+
 								if matchesPattern(edge.ResourceARN, resourceARN) {
+									// Check NotResource exclusion
+									if edge.NotResourcePatterns != nil {
+										if !policy.MatchesNotResource(edge.NotResourcePatterns, resourceARN) {
+											continue // Resource is excluded by NotResource
+										}
+									}
+
 									// Evaluate conditions
 									matched, err := conditions.Evaluate(edge.Conditions, evalCtx)
 									if err != nil {
@@ -286,7 +318,21 @@ func (g *Graph) CanAccess(principalARN, action, resourceARN string, ctx ...*cond
 			// Check if the action pattern matches the queried action
 			if policy.MatchesAction(actionPattern, action) {
 				for _, edge := range allowEdges {
+					// Check NotAction exclusion
+					if edge.NotActionPatterns != nil {
+						if !policy.MatchesNotAction(edge.NotActionPatterns, action) {
+							continue // Action is excluded by NotAction
+						}
+					}
+
 					if matchesPattern(edge.ResourceARN, resourceARN) {
+						// Check NotResource exclusion
+						if edge.NotResourcePatterns != nil {
+							if !policy.MatchesNotResource(edge.NotResourcePatterns, resourceARN) {
+								continue // Resource is excluded by NotResource
+							}
+						}
+
 						// Evaluate conditions
 						matched, err := conditions.Evaluate(edge.Conditions, evalCtx)
 						if err != nil {
@@ -381,15 +427,28 @@ func (g *Graph) CanAssume(principalARN, roleARN string) bool {
 // addPolicyEdges processes a policy document and adds edges to the graph
 func (g *Graph) addPolicyEdges(principalARN string, policy types.PolicyDocument) error {
 	for _, stmt := range policy.Statements {
+		// Extract actions and resources
 		actions := normalizeToSlice(stmt.Action)
 		resources := normalizeToSlice(stmt.Resource)
+		notActions := normalizeToSlice(stmt.NotAction)
+		notResources := normalizeToSlice(stmt.NotResource)
+
+		// Handle precedence: NotAction/NotResource without Action/Resource means apply to ALL except NotAction/NotResource
+		if len(notActions) > 0 && len(actions) == 0 {
+			// NotAction without Action: applies to all actions except NotAction
+			actions = []string{"*"}
+		}
+		if len(notResources) > 0 && len(resources) == 0 {
+			// NotResource without Resource: applies to all resources except NotResource
+			resources = []string{"*"}
+		}
 
 		isDeny := stmt.Effect == types.EffectDeny
 
 		for _, action := range actions {
 			for _, resource := range resources {
-				// Preserve conditions from the statement
-				g.AddEdgeWithConditions(principalARN, action, resource, isDeny, stmt.Condition, stmt.Sid)
+				// Create edge with NOT patterns stored in metadata
+				g.AddEdgeWithConditions(principalARN, action, resource, isDeny, stmt.Condition, stmt.Sid, notActions, notResources)
 			}
 		}
 	}
@@ -418,6 +477,18 @@ func (g *Graph) addResourcePolicyEdges(resourceARN string, policy types.PolicyDo
 		// Extract principals allowed/denied by this resource policy
 		principals := extractPrincipals(stmt.Principal)
 		actions := normalizeToSlice(stmt.Action)
+		notActions := normalizeToSlice(stmt.NotAction)
+		resources := normalizeToSlice(stmt.Resource)
+
+		// Handle precedence: NotAction without Action means apply to all actions except NotAction
+		if len(notActions) > 0 && len(actions) == 0 {
+			actions = []string{"*"}
+		}
+
+		// If no Resource specified in statement, use the resourceARN parameter (the resource itself)
+		if len(resources) == 0 {
+			resources = []string{resourceARN}
+		}
 
 		isDeny := stmt.Effect == types.EffectDeny
 
@@ -436,10 +507,13 @@ func (g *Graph) addResourcePolicyEdges(resourceARN string, policy types.PolicyDo
 				principalARN = "*"
 			}
 
-				// Add edge from principal to resource for each action
+			// Add edge from principal to resource for each action
 			// Preserve conditions from resource policy
+			// Note: NotResource doesn't make sense for resource policies (the resource is already fixed)
 			for _, action := range actions {
-				g.AddEdgeWithConditions(principalARN, action, resourceARN, isDeny, stmt.Condition, stmt.Sid)
+				for _, resource := range resources {
+					g.AddEdgeWithConditions(principalARN, action, resource, isDeny, stmt.Condition, stmt.Sid, notActions, nil)
+				}
 			}
 		}
 	}
@@ -514,7 +588,17 @@ func (g *Graph) isBlockedBySCP(principalARN, action, resourceARN string, ctx *co
 
 			// Check if this SCP allow applies to the action
 			actions := normalizeToSlice(stmt.Action)
+			notActions := normalizeToSlice(stmt.NotAction)
 			resources := normalizeToSlice(stmt.Resource)
+			notResources := normalizeToSlice(stmt.NotResource)
+
+			// Handle precedence: NotAction without Action means apply to all actions except NotAction
+			if len(notActions) > 0 && len(actions) == 0 {
+				actions = []string{"*"}
+			}
+			if len(notResources) > 0 && len(resources) == 0 {
+				resources = []string{"*"}
+			}
 
 			// Check if action matches
 			actionMatches := false
@@ -529,6 +613,13 @@ func (g *Graph) isBlockedBySCP(principalARN, action, resourceARN string, ctx *co
 				continue
 			}
 
+			// Check NotAction exclusion
+			if len(notActions) > 0 {
+				if !policy.MatchesNotAction(notActions, action) {
+					continue // Action is excluded by NotAction
+				}
+			}
+
 			// Check if resource matches
 			resourceMatches := false
 			for _, scpResource := range resources {
@@ -540,6 +631,13 @@ func (g *Graph) isBlockedBySCP(principalARN, action, resourceARN string, ctx *co
 
 			if !resourceMatches {
 				continue
+			}
+
+			// Check NotResource exclusion
+			if len(notResources) > 0 {
+				if !policy.MatchesNotResource(notResources, resourceARN) {
+					continue // Resource is excluded by NotResource
+				}
 			}
 
 			// Check conditions if present
@@ -580,7 +678,17 @@ func (g *Graph) isBlockedBySCP(principalARN, action, resourceARN string, ctx *co
 
 			// Check if this SCP deny applies to the action
 			actions := normalizeToSlice(stmt.Action)
+			notActions := normalizeToSlice(stmt.NotAction)
 			resources := normalizeToSlice(stmt.Resource)
+			notResources := normalizeToSlice(stmt.NotResource)
+
+			// Handle precedence: NotAction without Action means apply to all actions except NotAction
+			if len(notActions) > 0 && len(actions) == 0 {
+				actions = []string{"*"}
+			}
+			if len(notResources) > 0 && len(resources) == 0 {
+				resources = []string{"*"}
+			}
 
 			// Check if action matches
 			actionMatches := false
@@ -595,6 +703,13 @@ func (g *Graph) isBlockedBySCP(principalARN, action, resourceARN string, ctx *co
 				continue
 			}
 
+			// Check NotAction exclusion
+			if len(notActions) > 0 {
+				if !policy.MatchesNotAction(notActions, action) {
+					continue // Action is excluded by NotAction
+				}
+			}
+
 			// Check if resource matches
 			resourceMatches := false
 			for _, scpResource := range resources {
@@ -606,6 +721,13 @@ func (g *Graph) isBlockedBySCP(principalARN, action, resourceARN string, ctx *co
 
 			if !resourceMatches {
 				continue
+			}
+
+			// Check NotResource exclusion
+			if len(notResources) > 0 {
+				if !policy.MatchesNotResource(notResources, resourceARN) {
+					continue // Resource is excluded by NotResource
+				}
 			}
 
 			// Check conditions if present
@@ -664,7 +786,17 @@ func (g *Graph) isBlockedByBoundary(principalARN, action, resourceARN string, ct
 
 		// Check if this boundary allow applies to the action
 		actions := normalizeToSlice(stmt.Action)
+		notActions := normalizeToSlice(stmt.NotAction)
 		resources := normalizeToSlice(stmt.Resource)
+		notResources := normalizeToSlice(stmt.NotResource)
+
+		// Handle precedence: NotAction without Action means apply to all actions except NotAction
+		if len(notActions) > 0 && len(actions) == 0 {
+			actions = []string{"*"}
+		}
+		if len(notResources) > 0 && len(resources) == 0 {
+			resources = []string{"*"}
+		}
 
 		// Check if action matches
 		actionMatches := false
@@ -679,6 +811,13 @@ func (g *Graph) isBlockedByBoundary(principalARN, action, resourceARN string, ct
 			continue
 		}
 
+		// Check NotAction exclusion
+		if len(notActions) > 0 {
+			if !policy.MatchesNotAction(notActions, action) {
+				continue // Action is excluded by NotAction
+			}
+		}
+
 		// Check if resource matches
 		resourceMatches := false
 		for _, boundaryResource := range resources {
@@ -690,6 +829,13 @@ func (g *Graph) isBlockedByBoundary(principalARN, action, resourceARN string, ct
 
 		if !resourceMatches {
 			continue
+		}
+
+		// Check NotResource exclusion
+		if len(notResources) > 0 {
+			if !policy.MatchesNotResource(notResources, resourceARN) {
+				continue // Resource is excluded by NotResource
+			}
 		}
 
 		// Check conditions if present
@@ -723,7 +869,17 @@ func (g *Graph) isBlockedByBoundary(principalARN, action, resourceARN string, ct
 		}
 
 		actions := normalizeToSlice(stmt.Action)
+		notActions := normalizeToSlice(stmt.NotAction)
 		resources := normalizeToSlice(stmt.Resource)
+		notResources := normalizeToSlice(stmt.NotResource)
+
+		// Handle precedence: NotAction without Action means apply to all actions except NotAction
+		if len(notActions) > 0 && len(actions) == 0 {
+			actions = []string{"*"}
+		}
+		if len(notResources) > 0 && len(resources) == 0 {
+			resources = []string{"*"}
+		}
 
 		// Check if action matches
 		actionMatches := false
@@ -738,6 +894,13 @@ func (g *Graph) isBlockedByBoundary(principalARN, action, resourceARN string, ct
 			continue
 		}
 
+		// Check NotAction exclusion
+		if len(notActions) > 0 {
+			if !policy.MatchesNotAction(notActions, action) {
+				continue // Action is excluded by NotAction
+			}
+		}
+
 		// Check if resource matches
 		resourceMatches := false
 		for _, boundaryResource := range resources {
@@ -749,6 +912,13 @@ func (g *Graph) isBlockedByBoundary(principalARN, action, resourceARN string, ct
 
 		if !resourceMatches {
 			continue
+		}
+
+		// Check NotResource exclusion
+		if len(notResources) > 0 {
+			if !policy.MatchesNotResource(notResources, resourceARN) {
+				continue // Resource is excluded by NotResource
+			}
 		}
 
 		// Check conditions if present
@@ -793,7 +963,17 @@ func (g *Graph) isBlockedBySessionPolicy(action, resourceARN string, ctx *condit
 
 		// Check if this session policy allow applies to the action
 		actions := normalizeToSlice(stmt.Action)
+		notActions := normalizeToSlice(stmt.NotAction)
 		resources := normalizeToSlice(stmt.Resource)
+		notResources := normalizeToSlice(stmt.NotResource)
+
+		// Handle precedence: NotAction without Action means apply to all actions except NotAction
+		if len(notActions) > 0 && len(actions) == 0 {
+			actions = []string{"*"}
+		}
+		if len(notResources) > 0 && len(resources) == 0 {
+			resources = []string{"*"}
+		}
 
 		// Check if action matches
 		actionMatches := false
@@ -808,6 +988,13 @@ func (g *Graph) isBlockedBySessionPolicy(action, resourceARN string, ctx *condit
 			continue
 		}
 
+		// Check NotAction exclusion
+		if len(notActions) > 0 {
+			if !policy.MatchesNotAction(notActions, action) {
+				continue // Action is excluded by NotAction
+			}
+		}
+
 		// Check if resource matches
 		resourceMatches := false
 		for _, sessionResource := range resources {
@@ -819,6 +1006,13 @@ func (g *Graph) isBlockedBySessionPolicy(action, resourceARN string, ctx *condit
 
 		if !resourceMatches {
 			continue
+		}
+
+		// Check NotResource exclusion
+		if len(notResources) > 0 {
+			if !policy.MatchesNotResource(notResources, resourceARN) {
+				continue // Resource is excluded by NotResource
+			}
 		}
 
 		// Check conditions if present
@@ -852,7 +1046,17 @@ func (g *Graph) isBlockedBySessionPolicy(action, resourceARN string, ctx *condit
 		}
 
 		actions := normalizeToSlice(stmt.Action)
+		notActions := normalizeToSlice(stmt.NotAction)
 		resources := normalizeToSlice(stmt.Resource)
+		notResources := normalizeToSlice(stmt.NotResource)
+
+		// Handle precedence: NotAction without Action means apply to all actions except NotAction
+		if len(notActions) > 0 && len(actions) == 0 {
+			actions = []string{"*"}
+		}
+		if len(notResources) > 0 && len(resources) == 0 {
+			resources = []string{"*"}
+		}
 
 		// Check if action matches
 		actionMatches := false
@@ -867,6 +1071,13 @@ func (g *Graph) isBlockedBySessionPolicy(action, resourceARN string, ctx *condit
 			continue
 		}
 
+		// Check NotAction exclusion
+		if len(notActions) > 0 {
+			if !policy.MatchesNotAction(notActions, action) {
+				continue // Action is excluded by NotAction
+			}
+		}
+
 		// Check if resource matches
 		resourceMatches := false
 		for _, sessionResource := range resources {
@@ -878,6 +1089,13 @@ func (g *Graph) isBlockedBySessionPolicy(action, resourceARN string, ctx *condit
 
 		if !resourceMatches {
 			continue
+		}
+
+		// Check NotResource exclusion
+		if len(notResources) > 0 {
+			if !policy.MatchesNotResource(notResources, resourceARN) {
+				continue // Resource is excluded by NotResource
+			}
 		}
 
 		// Check conditions if present
