@@ -29,6 +29,8 @@ type HopOutput struct {
 	To         interface{}     `json:"to"` // Can be PrincipalOutput or ResourceOutput
 	Action     string          `json:"action"`
 	PolicyType string          `json:"policy_type"`
+	PolicyName string          `json:"policy_name,omitempty"`
+	Conditions []string        `json:"conditions,omitempty"`
 }
 
 // ReportOutput represents JSON output for report command

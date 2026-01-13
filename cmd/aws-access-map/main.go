@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/pfrederiksen/aws-access-map/internal/collector"
 	"github.com/pfrederiksen/aws-access-map/internal/graph"
+	"github.com/pfrederiksen/aws-access-map/internal/policy/conditions"
 	"github.com/pfrederiksen/aws-access-map/internal/query"
 	"github.com/pfrederiksen/aws-access-map/pkg/output"
 )
@@ -22,6 +23,12 @@ var (
 	debug   bool
 	region  string
 	format  string
+
+	// Condition evaluation context flags
+	sourceIP    string
+	mfa         bool
+	orgID       string
+	principalArn string
 )
 
 func main() {
@@ -38,6 +45,12 @@ to answer access questions about your AWS infrastructure.`,
 	rootCmd.PersistentFlags().StringVar(&region, "region", "", "AWS region (defaults to profile region)")
 	rootCmd.PersistentFlags().StringVar(&format, "format", "text", "Output format (text|json)")
 
+	// Condition evaluation context flags
+	rootCmd.PersistentFlags().StringVar(&sourceIP, "source-ip", "", "Source IP address for condition evaluation (e.g., 203.0.113.50)")
+	rootCmd.PersistentFlags().BoolVar(&mfa, "mfa", false, "Assume MFA is authenticated")
+	rootCmd.PersistentFlags().StringVar(&orgID, "org-id", "", "Principal organization ID (e.g., o-123456)")
+	rootCmd.PersistentFlags().StringVar(&principalArn, "principal-arn", "", "Principal ARN for condition evaluation")
+
 	// Add commands
 	rootCmd.AddCommand(versionCmd())
 	rootCmd.AddCommand(collectCmd())
@@ -49,6 +62,27 @@ to answer access questions about your AWS infrastructure.`,
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// buildEvaluationContext creates an evaluation context from CLI flags
+func buildEvaluationContext() *conditions.EvaluationContext {
+	ctx := conditions.NewDefaultContext()
+
+	// Override defaults with CLI flags if provided
+	if sourceIP != "" {
+		ctx.SourceIP = sourceIP
+	}
+	if mfa {
+		ctx.MFAAuthenticated = true
+	}
+	if orgID != "" {
+		ctx.PrincipalOrgID = orgID
+	}
+	if principalArn != "" {
+		ctx.PrincipalARN = principalArn
+	}
+
+	return ctx
 }
 
 func versionCmd() *cobra.Command {
@@ -249,8 +283,9 @@ func runWhoCan(resource, action string) error {
 
 	fmt.Fprintf(logOutput, "Querying who can perform '%s' on '%s'...\n\n", action, resource)
 
-	// Query the graph
-	engine := query.New(g)
+	// Query the graph with evaluation context
+	evalCtx := buildEvaluationContext()
+	engine := query.New(g).WithContext(evalCtx)
 	principals, err := engine.WhoCan(resource, action)
 	if err != nil {
 		return fmt.Errorf("query failed: %w", err)
@@ -294,8 +329,9 @@ func runPath(from, to, action string) error {
 
 	fmt.Fprintf(logOutput, "Finding paths from '%s' to '%s' for action '%s'...\n\n", from, to, action)
 
-	// Query the graph
-	engine := query.New(g)
+	// Query the graph with evaluation context
+	evalCtx := buildEvaluationContext()
+	engine := query.New(g).WithContext(evalCtx)
 	paths, err := engine.FindPaths(from, to, action)
 	if err != nil {
 		return fmt.Errorf("query failed: %w", err)
@@ -338,7 +374,9 @@ func runReport(account string, highRisk bool) error {
 
 	fmt.Fprintln(logOutput, "Analyzing for high-risk patterns...")
 
-	engine := query.New(g)
+	// Query the graph with evaluation context
+	evalCtx := buildEvaluationContext()
+	engine := query.New(g).WithContext(evalCtx)
 	findings, err := engine.FindHighRiskAccess()
 	if err != nil {
 		return fmt.Errorf("analysis failed: %w", err)
