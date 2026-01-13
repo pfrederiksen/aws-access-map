@@ -1014,3 +1014,314 @@ func TestFindHighRiskAccess_SensitiveActions(t *testing.T) {
 		})
 	}
 }
+
+// Test for Direct User Policy Attachments detector
+func TestFindHighRiskAccess_DirectUserPolicyAttachments(t *testing.T) {
+	g := graph.New()
+
+	// Add user with directly attached policy
+	userWithPolicy := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:user/developer",
+		Type: types.PrincipalTypeUser,
+		Name: "developer",
+		Policies: []types.PolicyDocument{
+			{
+				Version: "2012-10-17",
+				Statements: []types.Statement{
+					{
+						Effect:   types.EffectAllow,
+						Action:   "s3:GetObject",
+						Resource: "*",
+					},
+				},
+			},
+		},
+	}
+	g.AddPrincipal(userWithPolicy)
+
+	// Add user without policies (should not be flagged)
+	userWithoutPolicy := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:user/viewer",
+		Type: types.PrincipalTypeUser,
+		Name: "viewer",
+	}
+	g.AddPrincipal(userWithoutPolicy)
+
+	e := New(g)
+	findings, err := e.FindHighRiskAccess()
+
+	if err != nil {
+		t.Fatalf("FindHighRiskAccess() error = %v", err)
+	}
+
+	found := false
+	for _, f := range findings {
+		if f.Type == "Direct User Policy Attachment" && f.Severity == "LOW" {
+			if f.Principal != nil && f.Principal.Name == "developer" {
+				found = true
+				break
+			}
+		}
+	}
+
+	if !found {
+		t.Error("Did not find LOW direct user policy attachment finding")
+	}
+}
+
+// Test for Overly Permissive Lambda Roles detector
+func TestFindHighRiskAccess_OverlyPermissiveLambdaRoles(t *testing.T) {
+	g := graph.New()
+
+	// Add Lambda role with admin access
+	lambdaAdminRole := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:role/my-lambda-execution-role",
+		Type: types.PrincipalTypeRole,
+		Name: "my-lambda-execution-role",
+	}
+	g.AddPrincipal(lambdaAdminRole)
+	g.AddEdge(lambdaAdminRole.ARN, "*", "*", false)
+
+	e := New(g)
+	findings, err := e.FindHighRiskAccess()
+
+	if err != nil {
+		t.Fatalf("FindHighRiskAccess() error = %v", err)
+	}
+
+	found := false
+	for _, f := range findings {
+		if f.Type == "Overly Permissive Lambda Role" && f.Severity == "HIGH" {
+			if f.Principal != nil && f.Principal.Name == "my-lambda-execution-role" {
+				found = true
+				break
+			}
+		}
+	}
+
+	if !found {
+		t.Error("Did not find HIGH overly permissive Lambda role finding")
+	}
+}
+
+// Test for Wildcard Resource Policies detector
+func TestFindHighRiskAccess_WildcardResourcePolicies(t *testing.T) {
+	g := graph.New()
+
+	// S3 bucket with wildcard principal in resource policy
+	bucket := &types.Resource{
+		ARN:  "arn:aws:s3:::public-data",
+		Type: types.ResourceTypeS3,
+		Name: "public-data",
+		ResourcePolicy: &types.PolicyDocument{
+			Version: "2012-10-17",
+			Statements: []types.Statement{
+				{
+					Effect:    types.EffectAllow,
+					Principal: "*",
+					Action:    "s3:GetObject",
+					Resource:  "arn:aws:s3:::public-data/*",
+				},
+			},
+		},
+	}
+	g.AddResource(bucket)
+
+	e := New(g)
+	findings, err := e.FindHighRiskAccess()
+
+	if err != nil {
+		t.Fatalf("FindHighRiskAccess() error = %v", err)
+	}
+
+	found := false
+	for _, f := range findings {
+		if f.Type == "Wildcard Resource Policy" && f.Severity == "CRITICAL" {
+			if f.Resource != nil && f.Resource.Name == "public-data" {
+				found = true
+				break
+			}
+		}
+	}
+
+	if !found {
+		t.Error("Did not find CRITICAL wildcard resource policy finding")
+	}
+}
+
+// Test for Service Role Privilege Escalation detector
+func TestFindHighRiskAccess_ServiceRoleEscalation(t *testing.T) {
+	g := graph.New()
+
+	// Role with privilege escalation capabilities
+	escalationRole := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:role/ci-cd-role",
+		Type: types.PrincipalTypeRole,
+		Name: "ci-cd-role",
+	}
+	g.AddPrincipal(escalationRole)
+	g.AddEdge(escalationRole.ARN, "iam:PassRole", "*", false)
+	g.AddEdge(escalationRole.ARN, "iam:CreateRole", "*", false)
+
+	e := New(g)
+	findings, err := e.FindHighRiskAccess()
+
+	if err != nil {
+		t.Fatalf("FindHighRiskAccess() error = %v", err)
+	}
+
+	found := false
+	for _, f := range findings {
+		if f.Type == "Service Role Privilege Escalation" && f.Severity == "HIGH" {
+			if f.Principal != nil && f.Principal.Name == "ci-cd-role" {
+				found = true
+				break
+			}
+		}
+	}
+
+	if !found {
+		t.Error("Did not find HIGH service role privilege escalation finding")
+	}
+}
+
+// Test for Missing MFA for Privileged Users detector
+func TestFindHighRiskAccess_MissingMFAForPrivilegedUsers(t *testing.T) {
+	g := graph.New()
+
+	// Privileged user without MFA requirement
+	adminUser := &types.Principal{
+		ARN:  "arn:aws:iam::123456789012:user/admin-no-mfa",
+		Type: types.PrincipalTypeUser,
+		Name: "admin-no-mfa",
+		Policies: []types.PolicyDocument{
+			{
+				Version: "2012-10-17",
+				Statements: []types.Statement{
+					{
+						Effect:   types.EffectAllow,
+						Action:   "*",
+						Resource: "*",
+						// No MFA condition
+					},
+				},
+			},
+		},
+	}
+	g.AddPrincipal(adminUser)
+	g.AddEdge(adminUser.ARN, "*", "*", false)
+
+	e := New(g)
+	findings, err := e.FindHighRiskAccess()
+
+	if err != nil {
+		t.Fatalf("FindHighRiskAccess() error = %v", err)
+	}
+
+	found := false
+	for _, f := range findings {
+		if f.Type == "Missing MFA for Privileged User" && f.Severity == "MEDIUM" {
+			if f.Principal != nil && f.Principal.Name == "admin-no-mfa" {
+				found = true
+				break
+			}
+		}
+	}
+
+	if !found {
+		t.Error("Did not find MEDIUM missing MFA for privileged user finding")
+	}
+}
+
+// Test for Broad Network Access detector
+func TestFindHighRiskAccess_BroadNetworkAccess(t *testing.T) {
+	g := graph.New()
+
+	// S3 bucket with public access but no IP restrictions
+	bucket := &types.Resource{
+		ARN:  "arn:aws:s3:::open-bucket",
+		Type: types.ResourceTypeS3,
+		Name: "open-bucket",
+		ResourcePolicy: &types.PolicyDocument{
+			Version: "2012-10-17",
+			Statements: []types.Statement{
+				{
+					Effect:    types.EffectAllow,
+					Principal: "*",
+					Action:    "s3:GetObject",
+					Resource:  "arn:aws:s3:::open-bucket/*",
+					// No IP address conditions
+				},
+			},
+		},
+	}
+	g.AddResource(bucket)
+
+	e := New(g)
+	findings, err := e.FindHighRiskAccess()
+
+	if err != nil {
+		t.Fatalf("FindHighRiskAccess() error = %v", err)
+	}
+
+	found := false
+	for _, f := range findings {
+		if f.Type == "Broad Network Access" && f.Severity == "MEDIUM" {
+			if f.Resource != nil && f.Resource.Name == "open-bucket" {
+				found = true
+				break
+			}
+		}
+	}
+
+	if !found {
+		t.Error("Did not find MEDIUM broad network access finding")
+	}
+}
+
+// Test for Missing Resource-Based Policies detector
+func TestFindHighRiskAccess_MissingResourceBasedPolicies(t *testing.T) {
+	g := graph.New()
+
+	// KMS key without resource policy
+	kmsKey := &types.Resource{
+		ARN:  "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012",
+		Type: types.ResourceTypeKMS,
+		Name: "my-kms-key",
+		// No ResourcePolicy
+	}
+	g.AddResource(kmsKey)
+
+	e := New(g)
+	findings, err := e.FindHighRiskAccess()
+
+	if err != nil {
+		t.Fatalf("FindHighRiskAccess() error = %v", err)
+	}
+
+	found := false
+	for _, f := range findings {
+		if f.Type == "Missing Resource-Based Policy" && f.Severity == "MEDIUM" {
+			if f.Resource != nil && f.Resource.Name == "my-kms-key" {
+				found = true
+				break
+			}
+		}
+	}
+
+	if !found {
+		t.Error("Did not find MEDIUM missing resource-based policy finding")
+	}
+}
+
+// Test for Cross-Region Access detector
+func TestFindHighRiskAccess_CrossRegionAccess(t *testing.T) {
+	// Skip: Cross-region detection requires both principals and resources with region-specific ARNs
+	// IAM principals (users, roles, groups) are global and don't have regions in their ARNs
+	// S3 buckets are also global resources without region in ARN
+	// This detector is only useful for scenarios like:
+	//   - EC2 instances (have region) accessing RDS databases in different regions (have region)
+	//   - Lambda functions (have region) accessing DynamoDB tables (have region)
+	// Full implementation requires collecting region metadata beyond ARN parsing
+	t.Skip("Cross-region detection limited by global IAM principals and S3 ARNs - requires region-tagged resources")
+}
