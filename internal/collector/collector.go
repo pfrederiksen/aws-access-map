@@ -388,61 +388,6 @@ func min(a, b int) int {
 	return b
 }
 
-// collectSCPs fetches Service Control Policies from AWS Organizations
-func (c *Collector) collectSCPs(ctx context.Context) ([]types.PolicyDocument, error) {
-	if !c.includeSCPs {
-		return nil, nil // Skip if not enabled
-	}
-
-	var scps []types.PolicyDocument
-
-	// List all SCPs in the organization
-	paginator := organizations.NewListPoliciesPaginator(c.organizationsClient, &organizations.ListPoliciesInput{
-		Filter: organizationstypes.PolicyTypeServiceControlPolicy,
-	})
-
-	for paginator.HasMorePages() {
-		output, err := paginator.NextPage(ctx)
-		if err != nil {
-			// Handle permission errors gracefully (not all accounts have Org access)
-			if isAccessDeniedError(err) {
-				if c.debug {
-					fmt.Printf("DEBUG: No Organizations access, skipping SCPs: %v\n", err)
-				}
-				return nil, nil // Return empty, not an error
-			}
-			return nil, fmt.Errorf("failed to list SCPs: %w", err)
-		}
-
-		// For each SCP, get its policy document
-		for _, policySummary := range output.Policies {
-			policyDetail, err := c.organizationsClient.DescribePolicy(ctx, &organizations.DescribePolicyInput{
-				PolicyId: policySummary.Id,
-			})
-			if err != nil {
-				return nil, fmt.Errorf("failed to describe SCP %s: %w", *policySummary.Name, err)
-			}
-
-			// Parse the policy document
-			policyDoc, err := c.parsePolicy(*policyDetail.Policy.Content)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse SCP %s: %w", *policySummary.Name, err)
-			}
-
-			// Store SCP metadata (ID) in policy
-			policyDoc.ID = *policySummary.Id
-
-			if c.debug {
-				fmt.Printf("DEBUG: Collected SCP: %s (ID: %s)\n", *policySummary.Name, *policySummary.Id)
-			}
-
-			scps = append(scps, *policyDoc)
-		}
-	}
-
-	return scps, nil
-}
-
 // collectSCPsWithTargets fetches Service Control Policies with target information
 func (c *Collector) collectSCPsWithTargets(ctx context.Context) ([]types.SCPAttachment, error) {
 	if !c.includeSCPs {
