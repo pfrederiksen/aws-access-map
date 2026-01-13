@@ -39,15 +39,22 @@ aws-access-map collect --all-accounts
 ```
 
 **Handles the full AWS IAM policy evaluation model:**
+- ✅ **NotAction/NotResource** - inverse policy logic (v1.0.0)
 - ✅ Service Control Policies (SCPs) - organization-level
 - ✅ Permission boundaries - principal-level constraints
 - ✅ Session policies - temporary session constraints
 - ✅ Identity & resource policies
-- ✅ IAM groups - membership inheritance (v0.7.0)
-- ✅ Condition evaluation (IP, MFA, dates, ARNs, etc.)
+- ✅ IAM groups - membership inheritance
+- ✅ Condition evaluation (22 operators: IP, MFA, dates, ARNs, etc.)
 - ✅ Multi-account via AWS Organizations
-- ✅ Incremental caching - 10x speedup (v0.7.0)
-- ✅ Policy simulation - test without AWS (v0.7.0)
+- ✅ Incremental caching - 10x speedup
+- ✅ Policy simulation - test without AWS
+
+**Advanced Security Analysis (v1.0.0):**
+- 🔍 **13 Security Pattern Detectors** - Admin access, public exposure, privilege escalation, missing MFA, etc.
+- 📊 **Quantitative Risk Scoring** - Impact × Likelihood × Privilege calculations
+- 📋 **Compliance Reporting** - CIS AWS Foundations, PCI-DSS v3.2.1, SOC 2
+- 📈 **Access Matrices** - Principal × resource grids with CSV export
 
 ## Installation
 
