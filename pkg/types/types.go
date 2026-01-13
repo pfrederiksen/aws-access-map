@@ -4,12 +4,13 @@ import "time"
 
 // Principal represents an AWS principal (user, role, group, service)
 type Principal struct {
-	ARN         string
-	Type        PrincipalType
-	Name        string
-	AccountID   string
-	Policies    []PolicyDocument
-	TrustPolicy *PolicyDocument
+	ARN                 string
+	Type                PrincipalType
+	Name                string
+	AccountID           string
+	Policies            []PolicyDocument
+	TrustPolicy         *PolicyDocument
+	PermissionsBoundary *PolicyDocument
 }
 
 // PrincipalType represents the type of principal
@@ -129,7 +130,7 @@ type OUHierarchy struct {
 	ParentOUs []string // List of OU IDs from immediate parent to root
 }
 
-// CollectionResult holds all collected AWS data
+// CollectionResult holds all collected AWS data for a single account
 type CollectionResult struct {
 	Principals      []*Principal
 	Resources       []*Resource
@@ -139,4 +140,16 @@ type CollectionResult struct {
 	CollectedAt     time.Time
 	AccountID       string
 	Regions         []string
+}
+
+// MultiAccountCollectionResult holds collected AWS data from multiple accounts
+type MultiAccountCollectionResult struct {
+	Accounts       map[string]*CollectionResult // AccountID -> CollectionResult
+	SCPAttachments []SCPAttachment              // Organization-wide SCPs
+	OUHierarchy    map[string]*OUHierarchy      // AccountID -> OU hierarchy
+	CollectedAt    time.Time
+	OrganizationID string
+	SuccessCount   int      // Number of accounts successfully collected
+	FailureCount   int      // Number of accounts that failed
+	FailedAccounts []string // Account IDs that failed collection
 }

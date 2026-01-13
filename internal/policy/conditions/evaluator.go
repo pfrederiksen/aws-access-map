@@ -5,6 +5,8 @@ import (
 	"net"
 	"strings"
 	"time"
+
+	"github.com/pfrederiksen/aws-access-map/pkg/types"
 )
 
 // EvaluationContext contains runtime information for condition evaluation
@@ -31,6 +33,9 @@ type EvaluationContext struct {
 	// Date context
 	CurrentTime time.Time             // Current request time (for date comparisons)
 	DateContext map[string]time.Time // Date values for comparison (e.g., aws:CurrentTime, custom dates)
+
+	// Session policy context (for assumed role sessions)
+	SessionPolicy *types.PolicyDocument // Session policy for temporary credentials
 }
 
 // NewDefaultContext creates a permissive default context

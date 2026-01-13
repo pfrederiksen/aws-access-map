@@ -52,7 +52,10 @@ aws-access-map report --high-risk
 - Resource policies (S3, KMS, SQS, SNS, Secrets Manager)
 - Role trust policies and assumption chains
 - ✅ Service Control Policies (SCPs) with OU hierarchy
-- Permission boundaries (coming soon)
+- ✅ Permission boundaries (principal-level constraints)
+- ✅ Session policies (temporary session constraints)
+- ✅ Multi-account via AWS Organizations
+- ✅ File-based caching for fast repeated queries
 - Resource-based grants
 
 ## Installation
@@ -212,28 +215,40 @@ aws-access-map who-can "arn:aws:iam::*:*" --action "iam:DeleteUser" --mfa
 ## Commands
 
 ### `collect`
-Fetch IAM data from your AWS account and save it locally.
+Fetch IAM data from your AWS account (or entire organization) and save it locally.
 
 ```bash
-aws-access-map collect [--output FILE] [--profile PROFILE] [--region REGION] [--format FORMAT] [--include-scps]
+aws-access-map collect [OPTIONS]
 
-# Examples:
-aws-access-map collect                              # Saves to aws-access-data.json
+# Single Account Examples:
+aws-access-map collect                              # Saves to aws-access-data.json (with auto-caching)
 aws-access-map collect --output prod-account.json   # Custom filename
 aws-access-map collect --profile prod               # Use specific AWS profile
 aws-access-map collect --format json                # JSON output (machine-readable)
 aws-access-map collect --include-scps               # Include Service Control Policies (requires Organizations access)
+
+# Caching Options:
+aws-access-map collect                              # Default: try cache first, collect if stale/missing
+aws-access-map collect --no-cache                   # Force fresh collection, bypass cache
+aws-access-map collect --cache                      # Force use cache, fail if missing/stale
+aws-access-map collect --cache-ttl 12h              # Custom cache TTL (default: 24h)
+
+# Multi-Account Collection (Organization-Wide):
+aws-access-map collect --all-accounts               # Collect from all accounts in organization
+aws-access-map collect --all-accounts --role-name CustomRole  # Use custom cross-account role
 ```
 
 **What it collects:**
 - ✅ IAM users (with inline and managed policies)
 - ✅ IAM roles (with trust policies and permissions)
+- ✅ **Permission boundaries** (principal-level constraints)
 - ✅ S3 bucket policies
 - ✅ KMS key policies
 - ✅ SQS queue policies
 - ✅ SNS topic policies
 - ✅ Secrets Manager resource policies
 - ✅ **Service Control Policies (SCPs)** with `--include-scps` flag (requires Organizations access)
+- ✅ **Multi-account data** with `--all-accounts` flag (requires Organizations access and cross-account role)
 - ⏳ IAM groups (roadmap)
 
 **Service Control Policies (SCPs):**
@@ -263,6 +278,57 @@ aws-access-map collect --include-scps
 #
 # SCPs will be automatically applied during who-can and path queries
 ```
+
+See [PERMISSIONS.md](PERMISSIONS.md) for detailed IAM permission requirements.
+
+**Multi-Account Collection:**
+
+Collect IAM data from all accounts in your AWS Organization in a single command:
+
+```bash
+# Collect from all accounts (requires Organizations access)
+aws-access-map collect --all-accounts
+
+# Use custom cross-account role name (default: OrganizationAccountAccessRole)
+aws-access-map collect --all-accounts --role-name MyCustomRole
+```
+
+**How it works:**
+1. Lists all active accounts in your AWS Organization
+2. Assumes a role in each member account (via STS AssumeRole)
+3. Collects IAM data from each account in parallel
+4. Aggregates results with organization-wide SCPs
+5. Tracks success/failure per account
+
+**Requirements:**
+- Must run from AWS Organizations management account (or delegated admin)
+- Requires cross-account role with IAM read permissions in each member account
+- Default role name: `OrganizationAccountAccessRole` (created automatically by AWS Organizations)
+- See [PERMISSIONS.md](PERMISSIONS.md) for detailed permission requirements
+
+**Output includes:**
+- Per-account collection results (principals, resources, policies)
+- Organization-wide SCPs with target information
+- OU hierarchy for each account
+- Success/failure counts and failed account IDs
+
+**Performance:** Collection speed depends on number of accounts and IAM resources per account. Typical organization (10-50 accounts) completes in 30-60 seconds.
+
+**Permission Boundaries and Session Policies:**
+
+aws-access-map fully evaluates AWS's constraint mechanisms:
+
+- **Permission Boundaries**: Principal-level filters that limit maximum permissions. Automatically collected with users/roles and enforced during queries.
+- **Session Policies**: Temporary constraints applied during AssumeRole operations. Can be specified via `EvaluationContext` in code for programmatic use.
+
+Both use an allowlist model: actions must be explicitly allowed, and explicit denies override allows. These constraints are evaluated in the correct order per [AWS policy evaluation logic](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_evaluation-logic.html):
+
+1. SCPs (organization-level)
+2. Permission boundaries (principal-level)
+3. Session policies (session-level)
+4. Explicit denies (always win)
+5. Explicit allows (grant access)
+6. Implicit deny (default)
 
 See [PERMISSIONS.md](PERMISSIONS.md) for detailed IAM permission requirements.
 
@@ -372,6 +438,35 @@ aws-access-map report --format json                 # JSON output for CI/CD
 - ✅ **Cross-Account Access** (MEDIUM): Principals from external AWS accounts
 - ✅ **Overly Permissive S3** (HIGH): Principals with `s3:*` on all buckets
 - ✅ **Sensitive Actions** (HIGH): Access to IAM/KMS/Secrets Manager/STS on all resources
+
+### `cache`
+Manage cached AWS collection data for faster repeated queries.
+
+```bash
+# View cache information for an account
+aws-access-map cache info --account 123456789012
+
+# Clear cache for specific account
+aws-access-map cache clear --account 123456789012
+
+# Clear all cached data
+aws-access-map cache clear
+```
+
+**Caching behavior:**
+- **Automatic**: Data is automatically cached after collection (stored in `~/.aws-access-map/cache/`)
+- **TTL**: Default 24-hour expiration (configurable with `--cache-ttl`)
+- **Per-account**: Each account has its own cache file (`{accountID}-{timestamp}.json`)
+- **Transparent**: Queries automatically use cache if available and fresh
+- **Manual control**: Use `--cache`, `--no-cache`, or `--cache-ttl` flags
+
+**Cache file location:** `~/.aws-access-map/cache/{accountID}-{timestamp}.json`
+
+**When cache is used:**
+- By default, `collect` checks cache first and falls back to fresh collection if stale/missing
+- Use `--cache` to force using cache (fails if unavailable)
+- Use `--no-cache` to force fresh collection
+- `who-can`, `path`, and `report` commands automatically use cached data from most recent `collect`
 
 ## How It Works
 

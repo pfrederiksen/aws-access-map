@@ -209,7 +209,19 @@ func (g *Graph) CanAccess(principalARN, action, resourceARN string, ctx ...*cond
 		return false // SCP denies this action organization-wide
 	}
 
-	// STEP 1: Check for explicit deny from identity/resource policies (deny always wins)
+	// STEP 1: Check permission boundaries (principal-level filter)
+	// Boundaries act as permission filters - action must be explicitly allowed
+	if g.isBlockedByBoundary(principalARN, action, resourceARN, evalCtx) {
+		return false // Permission boundary blocks this action
+	}
+
+	// STEP 2: Check session policies (temporary session constraints)
+	// Session policies narrow permissions during assumed role sessions
+	if g.isBlockedBySessionPolicy(action, resourceARN, evalCtx) {
+		return false // Session policy blocks this action
+	}
+
+	// STEP 3: Check for explicit deny from identity/resource policies (deny always wins)
 	// Need to check all action patterns, not just exact match
 	if actionMap, ok := g.denies[principalARN]; ok {
 		for actionPattern, denyEdges := range actionMap {
@@ -236,6 +248,7 @@ func (g *Graph) CanAccess(principalARN, action, resourceARN string, ctx ...*cond
 		}
 	}
 
+	// STEP 4: Check for explicit allow from identity policies
 	// Check for allow - also need to check action patterns
 	if actionMap, ok := g.principalActions[principalARN]; ok {
 		for actionPattern, allowEdges := range actionMap {
@@ -262,6 +275,8 @@ func (g *Graph) CanAccess(principalARN, action, resourceARN string, ctx ...*cond
 		}
 	}
 
+	// STEP 5: Default deny (implicit)
+	// No explicit allow found, so access is implicitly denied
 	return false
 }
 
@@ -565,6 +580,277 @@ func (g *Graph) isBlockedBySCP(principalARN, action, resourceARN string, ctx *co
 			// SCP explicitly denies this action
 			return true
 		}
+	}
+
+	// Has explicit allow and no explicit deny
+	return false
+}
+
+// isBlockedByBoundary checks if a permission boundary blocks the action
+// Permission boundaries act as permission filters (allowlists):
+// 1. Actions must be explicitly allowed by the boundary
+// 2. If no boundary exists, nothing is blocked
+// 3. If boundary exists but doesn't allow action, it's implicitly denied
+// 4. Explicit denies in boundaries also block
+func (g *Graph) isBlockedByBoundary(principalARN, action, resourceARN string, ctx *conditions.EvaluationContext) bool {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	// Look up the principal to get their boundary
+	principal, exists := g.principals[principalARN]
+	if !exists {
+		// Principal not found - no boundary to check
+		return false
+	}
+
+	// If no permission boundary attached, nothing is blocked
+	if principal.PermissionsBoundary == nil {
+		return false
+	}
+
+	boundary := principal.PermissionsBoundary
+
+	// Step 1: Check if action is explicitly allowed by the boundary
+	hasExplicitAllow := false
+	for _, stmt := range boundary.Statements {
+		if stmt.Effect != types.EffectAllow {
+			continue
+		}
+
+		// Check if this boundary allow applies to the action
+		actions := normalizeToSlice(stmt.Action)
+		resources := normalizeToSlice(stmt.Resource)
+
+		// Check if action matches
+		actionMatches := false
+		for _, boundaryAction := range actions {
+			if policy.MatchesAction(boundaryAction, action) {
+				actionMatches = true
+				break
+			}
+		}
+
+		if !actionMatches {
+			continue
+		}
+
+		// Check if resource matches
+		resourceMatches := false
+		for _, boundaryResource := range resources {
+			if matchesPattern(boundaryResource, resourceARN) {
+				resourceMatches = true
+				break
+			}
+		}
+
+		if !resourceMatches {
+			continue
+		}
+
+		// Check conditions if present
+		if len(stmt.Condition) > 0 {
+			matched, err := conditions.Evaluate(stmt.Condition, ctx)
+			if err != nil {
+				// Fail closed for allow conditions - if we can't evaluate, skip this allow
+				log.Printf("Warning: Failed to evaluate boundary allow condition (policy %s): %v (skipping this allow)", boundary.ID, err)
+				continue
+			}
+			if !matched {
+				// Conditions didn't match, allow doesn't apply
+				continue
+			}
+		}
+
+		// Found an explicit allow
+		hasExplicitAllow = true
+		break
+	}
+
+	// Step 2: If no explicit allow found, action is implicitly denied by boundary
+	if !hasExplicitAllow {
+		return true
+	}
+
+	// Step 3: Check for explicit deny (deny overrides allow)
+	for _, stmt := range boundary.Statements {
+		if stmt.Effect != types.EffectDeny {
+			continue
+		}
+
+		actions := normalizeToSlice(stmt.Action)
+		resources := normalizeToSlice(stmt.Resource)
+
+		// Check if action matches
+		actionMatches := false
+		for _, boundaryAction := range actions {
+			if policy.MatchesAction(boundaryAction, action) {
+				actionMatches = true
+				break
+			}
+		}
+
+		if !actionMatches {
+			continue
+		}
+
+		// Check if resource matches
+		resourceMatches := false
+		for _, boundaryResource := range resources {
+			if matchesPattern(boundaryResource, resourceARN) {
+				resourceMatches = true
+				break
+			}
+		}
+
+		if !resourceMatches {
+			continue
+		}
+
+		// Check conditions if present
+		if len(stmt.Condition) > 0 {
+			matched, err := conditions.Evaluate(stmt.Condition, ctx)
+			if err != nil {
+				// Fail closed for deny conditions - if we can't evaluate, treat as deny
+				log.Printf("Warning: Failed to evaluate boundary deny condition (policy %s): %v (treating as deny)", boundary.ID, err)
+				return true
+			}
+			if !matched {
+				// Conditions didn't match, deny doesn't apply
+				continue
+			}
+		}
+
+		// Explicit deny found
+		return true
+	}
+
+	// Has explicit allow and no explicit deny
+	return false
+}
+
+// isBlockedBySessionPolicy checks if a session policy blocks the action
+// Session policies are temporary constraints applied during role assumption
+// They narrow permissions (allowlist) and cannot grant additional access
+func (g *Graph) isBlockedBySessionPolicy(action, resourceARN string, ctx *conditions.EvaluationContext) bool {
+	// If no session policy in context, nothing is blocked
+	if ctx == nil || ctx.SessionPolicy == nil {
+		return false
+	}
+
+	sessionPolicy := ctx.SessionPolicy
+
+	// Step 1: Check if action is explicitly allowed by the session policy
+	hasExplicitAllow := false
+	for _, stmt := range sessionPolicy.Statements {
+		if stmt.Effect != types.EffectAllow {
+			continue
+		}
+
+		// Check if this session policy allow applies to the action
+		actions := normalizeToSlice(stmt.Action)
+		resources := normalizeToSlice(stmt.Resource)
+
+		// Check if action matches
+		actionMatches := false
+		for _, sessionAction := range actions {
+			if policy.MatchesAction(sessionAction, action) {
+				actionMatches = true
+				break
+			}
+		}
+
+		if !actionMatches {
+			continue
+		}
+
+		// Check if resource matches
+		resourceMatches := false
+		for _, sessionResource := range resources {
+			if matchesPattern(sessionResource, resourceARN) {
+				resourceMatches = true
+				break
+			}
+		}
+
+		if !resourceMatches {
+			continue
+		}
+
+		// Check conditions if present
+		if len(stmt.Condition) > 0 {
+			matched, err := conditions.Evaluate(stmt.Condition, ctx)
+			if err != nil {
+				// Fail closed for allow conditions - if we can't evaluate, skip this allow
+				log.Printf("Warning: Failed to evaluate session policy allow condition (policy %s): %v (skipping this allow)", sessionPolicy.ID, err)
+				continue
+			}
+			if !matched {
+				// Conditions didn't match, allow doesn't apply
+				continue
+			}
+		}
+
+		// Found an explicit allow
+		hasExplicitAllow = true
+		break
+	}
+
+	// Step 2: If no explicit allow found, action is implicitly denied by session policy
+	if !hasExplicitAllow {
+		return true
+	}
+
+	// Step 3: Check for explicit deny (deny overrides allow)
+	for _, stmt := range sessionPolicy.Statements {
+		if stmt.Effect != types.EffectDeny {
+			continue
+		}
+
+		actions := normalizeToSlice(stmt.Action)
+		resources := normalizeToSlice(stmt.Resource)
+
+		// Check if action matches
+		actionMatches := false
+		for _, sessionAction := range actions {
+			if policy.MatchesAction(sessionAction, action) {
+				actionMatches = true
+				break
+			}
+		}
+
+		if !actionMatches {
+			continue
+		}
+
+		// Check if resource matches
+		resourceMatches := false
+		for _, sessionResource := range resources {
+			if matchesPattern(sessionResource, resourceARN) {
+				resourceMatches = true
+				break
+			}
+		}
+
+		if !resourceMatches {
+			continue
+		}
+
+		// Check conditions if present
+		if len(stmt.Condition) > 0 {
+			matched, err := conditions.Evaluate(stmt.Condition, ctx)
+			if err != nil {
+				// Fail closed for deny conditions - if we can't evaluate, treat as deny
+				log.Printf("Warning: Failed to evaluate session policy deny condition (policy %s): %v (treating as deny)", sessionPolicy.ID, err)
+				return true
+			}
+			if !matched {
+				// Conditions didn't match, deny doesn't apply
+				continue
+			}
+		}
+
+		// Explicit deny found
+		return true
 	}
 
 	// Has explicit allow and no explicit deny
