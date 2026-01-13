@@ -8,7 +8,7 @@ One command. One answer. No UI required.
 
 ---
 
-📚 **Documentation**: [Examples](EXAMPLES.md) · [Usage Guide](USAGE.md) · [Permissions](PERMISSIONS.md) · [Architecture](CLAUDE.md) · [Testing](TESTING.md)
+📚 **Documentation**: [Examples](docs/usage/EXAMPLES.md) · [Usage Guide](docs/usage/docs/usage/USAGE.md) · [Permissions](docs/usage/docs/usage/PERMISSIONS.md) · [Architecture](docs/development/CLAUDE.md) · [Testing](docs/development/TESTING.md)
 
 ---
 
@@ -92,7 +92,7 @@ aws-access-map path \
   --action s3:GetObject
 ```
 
-**See [EXAMPLES.md](EXAMPLES.md) for real-world scenarios** (offboarding, debugging, audits, incident response).
+**See [EXAMPLES.md](docs/usage/EXAMPLES.md) for real-world scenarios** (offboarding, debugging, audits, incident response).
 
 ## Core Commands
 
@@ -155,7 +155,7 @@ aws-access-map cache info --account 123456789012
 aws-access-map cache clear
 ```
 
-**See [USAGE.md](USAGE.md) for complete command reference.**
+**See [docs/usage/USAGE.md](docs/usage/USAGE.md) for complete command reference.**
 
 ## Key Features
 
@@ -183,7 +183,7 @@ aws-access-map collect --all-accounts --role-name CustomAuditRole
 **Requirements:**
 - AWS Organizations access from management account
 - Cross-account role in member accounts (default: `OrganizationAccountAccessRole`)
-- See [PERMISSIONS.md](PERMISSIONS.md) for details
+- See [docs/usage/PERMISSIONS.md](docs/usage/PERMISSIONS.md) for details
 
 ### ✅ Condition Evaluation (v0.4.0)
 
@@ -289,7 +289,7 @@ aws-access-map who-can "arn:aws:s3:::*" --action s3:GetObject
 **Multi-Account:**
 - ✅ Organization-wide collection (v0.6.0)
 
-See [PERMISSIONS.md](PERMISSIONS.md) for required IAM permissions.
+See [docs/usage/PERMISSIONS.md](docs/usage/PERMISSIONS.md) for required IAM permissions.
 
 ## How It Works
 

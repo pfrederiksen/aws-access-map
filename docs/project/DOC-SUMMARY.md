@@ -1,5 +1,7 @@
 # Documentation Summary
 
+**Note:** This document is historical. For the current documentation index, see [../README.md](../README.md).
+
 This project has comprehensive documentation organized by audience and purpose.
 
 ## For Users
