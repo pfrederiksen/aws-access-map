@@ -16,6 +16,12 @@ github.com/aws/aws-sdk-go-v2/internal/ini v1.8.4 h1:WKuaxf++XKWlHWu9ECbMlha8WOEG
 github.com/aws/aws-sdk-go-v2/internal/ini v1.8.4/go.mod h1:ZWy7j6v1vWGmPReu0iSGvRiise4YI5SkR3OHKTZ6Wuc=
 github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.17 h1:JqcdRG//czea7Ppjb+g/n4o8i/R50aTBHkA7vu0lK+k=
 github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.17/go.mod h1:CO+WeGmIdj/MlPel2KwID9Gt7CNq4M65HUfBW97liM0=
+github.com/aws/aws-sdk-go-v2/service/apigateway v1.38.4 h1:V8gcFwJPP3eXZXpeui+p97JmO7WtCkQlEAHrE6Kyt0k=
+github.com/aws/aws-sdk-go-v2/service/apigateway v1.38.4/go.mod h1:iJF5UdwkFue/YuUGCFsCCdT3SBMUx0s+h5TNi0Sz+qg=
+github.com/aws/aws-sdk-go-v2/service/ecr v1.55.1 h1:B7f9R99lCF83XlolTg6d6Lvghyto+/VU83ZrneAVfK8=
+github.com/aws/aws-sdk-go-v2/service/ecr v1.55.1/go.mod h1:cpYRXx5BkmS3mwWRKPbWSPKmyAUNL7aLWAPiiinwk/U=
+github.com/aws/aws-sdk-go-v2/service/eventbridge v1.45.18 h1:Zqe/Mbpjy3Vk0IKreW4cdxz2PBb0JNCeMwYAKbuBnvg=
+github.com/aws/aws-sdk-go-v2/service/eventbridge v1.45.18/go.mod h1:oGNgLQOntNCt7Tl3d1NQu5QKFxdufg4huUAmyNECPDU=
 github.com/aws/aws-sdk-go-v2/service/iam v1.53.2 h1:62G6btFUwAa5uR5iPlnlNVAM0zJSLbWgDfKOfUC7oW4=
 github.com/aws/aws-sdk-go-v2/service/iam v1.53.2/go.mod h1:av9clChrbZbJ5E21msSsiT2oghl2BJHfQGhCkXmhyu8=
 github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.4 h1:0ryTNEdJbzUCEWkVXEXoqlXV72J5keC1GvILMOuD00E=
@@ -28,6 +34,8 @@ github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.19.17 h1:bGeHBsGZx0Dvu
 github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.19.17/go.mod h1:dcW24lbU0CzHusTE8LLHhRLI42ejmINN8Lcr22bwh/g=
 github.com/aws/aws-sdk-go-v2/service/kms v1.49.5 h1:DKibav4XF66XSeaXcrn9GlWGHos6D/vJ4r7jsK7z5CE=
 github.com/aws/aws-sdk-go-v2/service/kms v1.49.5/go.mod h1:1SdcmEGUEQE1mrU2sIgeHtcMSxHuybhPvuEPANzIDfI=
+github.com/aws/aws-sdk-go-v2/service/lambda v1.87.1 h1:QBdmTXWwqVgx0PueT/Xgp2+al5HR0gAV743pTzYeBRw=
+github.com/aws/aws-sdk-go-v2/service/lambda v1.87.1/go.mod h1:ogjbkxFgFOjG3dYFQ8irC92gQfpfMDcy1RDKNSZWXNU=
 github.com/aws/aws-sdk-go-v2/service/organizations v1.50.1 h1:N8ByyRKFico1O0ysCRJupnB7dyAAguu5H7rM1mDyApw=
 github.com/aws/aws-sdk-go-v2/service/organizations v1.50.1/go.mod h1:6WyPYQBJwPA/71gHpvO2f5O7yxn1uQZBm600CiXno1s=
 github.com/aws/aws-sdk-go-v2/service/s3 v1.95.1 h1:C2dUPSnEpy4voWFIq3JNd8gN0Y5vYGDo44eUE58a/p8=

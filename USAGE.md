@@ -8,6 +8,7 @@ Complete command reference for aws-access-map.
 - [who-can](#who-can) - Find principals with access
 - [path](#path) - Discover access paths
 - [report](#report) - Security analysis
+- [simulate](#simulate) - Test policies locally (v0.7.0)
 - [cache](#cache) - Manage cached data
 - [Global Flags](#global-flags)
 - [Condition Evaluation](#condition-evaluation)
@@ -33,6 +34,7 @@ aws-access-map collect [OPTIONS]
 | `--include-scps` | bool | `false` | Collect Service Control Policies (requires Organizations access) |
 | `--all-accounts` | bool | `false` | Collect from all accounts in organization |
 | `--role-name` | string | `OrganizationAccountAccessRole` | Role to assume in member accounts (with `--all-accounts`) |
+| `--incremental` | bool | `false` | Use incremental caching (10x faster for large accounts) |
 | `--cache` | bool | `false` | Force use cached data (fail if missing/stale) |
 | `--no-cache` | bool | `false` | Force fresh collection, bypass cache |
 | `--cache-ttl` | duration | `24h` | Cache time-to-live (e.g., `12h`, `30m`, `2h30m`) |
@@ -51,6 +53,9 @@ aws-access-map collect --output prod-account.json
 
 # Include SCPs from Organizations
 aws-access-map collect --include-scps
+
+# Incremental collection (10x faster for large accounts)
+aws-access-map collect --incremental
 ```
 
 ### Multi-Account Collection
@@ -101,16 +106,26 @@ aws-access-map collect --all-accounts
 
 ### What It Collects
 
+**IAM Entities:**
 - ✅ IAM users (inline + managed policies)
 - ✅ IAM roles (trust policies + permissions)
+- ✅ IAM groups with membership resolution (v0.7.0)
 - ✅ Permission boundaries
+- ✅ Service Control Policies (with `--include-scps`)
+
+**Resource Policies:**
 - ✅ S3 bucket policies
 - ✅ KMS key policies
 - ✅ SQS queue policies
 - ✅ SNS topic policies
 - ✅ Secrets Manager resource policies
-- ✅ Service Control Policies (with `--include-scps`)
-- ✅ Multi-account data (with `--all-accounts`)
+- ✅ Lambda functions (v0.7.0)
+- ✅ API Gateway REST APIs (v0.7.0)
+- ✅ ECR repositories (v0.7.0)
+- ✅ EventBridge event buses (v0.7.0)
+
+**Multi-Account:**
+- ✅ Organization-wide collection (with `--all-accounts`)
 
 ---
 
@@ -356,6 +371,341 @@ High-Risk Findings:
 
 ---
 
+## simulate
+
+Test policies locally without AWS credentials. Load policies from JSON files and run access queries, comparisons, and security validations. Perfect for CI/CD integration and local development.
+
+### Subcommands
+
+- `simulate who-can` - Query local policy data
+- `simulate diff` - Compare two policy sets
+- `simulate test` - Test a single policy change
+- `simulate validate` - Check for security issues
+
+---
+
+### `simulate who-can`
+
+Run who-can queries using local policy data instead of AWS APIs.
+
+#### Syntax
+
+```bash
+aws-access-map simulate who-can RESOURCE --action ACTION --data FILE [OPTIONS]
+```
+
+#### Required Arguments
+
+| Argument | Description | Example |
+|----------|-------------|---------|
+| `RESOURCE` | Resource ARN or wildcard | `*`, `arn:aws:s3:::bucket/*` |
+| `--action` | AWS action to check | `*`, `s3:GetObject` |
+| `--data` | Local policy data file (JSON) | `policies.json` |
+
+#### Examples
+
+```bash
+# Find admins in local policy file
+aws-access-map simulate who-can "*" --action "*" \
+  --data local-policies.json
+
+# Check Lambda invocation access
+aws-access-map simulate who-can \
+  "arn:aws:lambda:us-east-1:123456789012:function:my-fn" \
+  --action lambda:InvokeFunction \
+  --data test-policies.json
+
+# With condition context
+aws-access-map simulate who-can "*" --action "*" \
+  --data policies.json \
+  --source-ip "203.0.113.50" \
+  --mfa
+```
+
+**Use cases:**
+- Test policies before AWS deployment
+- Local development without AWS credentials
+- CI/CD policy validation
+- Security audits of proposed changes
+
+---
+
+### `simulate diff`
+
+Compare access between two policy sets to see what changes.
+
+#### Syntax
+
+```bash
+aws-access-map simulate diff --before FILE --after FILE [OPTIONS]
+```
+
+#### Required Arguments
+
+| Argument | Description | Example |
+|----------|-------------|---------|
+| `--before` | Policy data before changes | `current.json` |
+| `--after` | Policy data after changes | `proposed.json` |
+
+#### Optional Arguments
+
+| Argument | Description | Default |
+|----------|-------------|---------|
+| `--resource` | Resource ARN to check | `*` |
+| `--action` | Action to check | `*` |
+
+#### Examples
+
+```bash
+# Compare all access
+aws-access-map simulate diff \
+  --before prod-current.json \
+  --after proposed-changes.json
+
+# Check specific resource
+aws-access-map simulate diff \
+  --before current.json \
+  --after proposed.json \
+  --resource "arn:aws:s3:::sensitive-bucket/*" \
+  --action "s3:DeleteObject"
+
+# Compare with specific action
+aws-access-map simulate diff \
+  --before before.json \
+  --after after.json \
+  --action "iam:*"
+```
+
+#### Output
+
+Shows three categories of changes:
+
+- **✅ NEW ACCESS GRANTED**: Principals who gained access
+- **❌ ACCESS REVOKED**: Principals who lost access
+- **➡️ UNCHANGED ACCESS**: Principals with same access
+
+**Example output:**
+```
+Access Diff for * (action: *)
+
+✅ NEW ACCESS GRANTED (2 principals):
+  + arn:aws:iam::123456789012:role/Developer
+  + arn:aws:iam::123456789012:user/alice
+
+❌ ACCESS REVOKED (1 principal):
+  - arn:aws:iam::123456789012:role/OldRole
+
+➡️ UNCHANGED ACCESS (3 principals)
+```
+
+**Use cases:**
+- Impact analysis before deploying policy changes
+- Review proposed IAM changes in pull requests
+- Audit policy updates for security compliance
+- Track access changes over time
+
+---
+
+### `simulate test`
+
+Test a single policy change to see its impact.
+
+#### Syntax
+
+```bash
+aws-access-map simulate test --data BASE_FILE --add-policy POLICY_FILE --principal ARN
+```
+
+#### Required Arguments
+
+| Argument | Description | Example |
+|----------|-------------|---------|
+| `--data` | Base policy data file | `current.json` |
+| `--add-policy` | Policy to add (JSON file) | `new-role-policy.json` |
+| `--principal` | Principal ARN to modify | `arn:aws:iam::*:role/MyRole` |
+
+#### Examples
+
+```bash
+# Test adding a new policy
+aws-access-map simulate test \
+  --data current-policies.json \
+  --add-policy new-s3-access.json \
+  --principal "arn:aws:iam::123456789012:role/AppRole"
+
+# Test with output file
+aws-access-map simulate test \
+  --data prod.json \
+  --add-policy proposed-policy.json \
+  --principal "arn:aws:iam::123456789012:user/alice" \
+  --output test-result.json
+```
+
+#### Output
+
+Shows:
+- Security warnings (if policy grants admin access, etc.)
+- Access changes for the modified principal
+- Recommendations
+
+**Example output:**
+```
+🔍 Testing policy change...
+Principal: arn:aws:iam::123456789012:role/MyRole
+New Policy: new-role-policy.json
+
+⚠️  WARNING: This policy grants S3 full access (s3:* on arn:aws:s3:::*)
+
+Access Changes:
+  + NEW: Can perform s3:* on arn:aws:s3:::*
+  + NEW: Can perform s3:PutObject on arn:aws:s3:::bucket/*
+```
+
+---
+
+### `simulate validate`
+
+Check policies for security issues. Exits with code 1 if issues are found (useful for CI/CD).
+
+#### Syntax
+
+```bash
+aws-access-map simulate validate --data FILE
+```
+
+#### Required Arguments
+
+| Argument | Description | Example |
+|----------|-------------|---------|
+| `--data` | Policy data file to validate | `policies.json` |
+
+#### Examples
+
+```bash
+# Validate policies
+aws-access-map simulate validate --data proposed-policies.json
+
+# In CI/CD pipeline (exits 1 if issues found)
+if ! aws-access-map simulate validate --data policies.json; then
+  echo "Security issues detected!"
+  exit 1
+fi
+```
+
+#### Security Checks
+
+| Check | Severity | Description |
+|-------|----------|-------------|
+| **Full admin access** | CRITICAL | Principals with `Action: *`, `Resource: *` |
+| **Public access** | CRITICAL | Resources allowing `Principal: *` |
+| **Unused principals** | LOW | Principals with no policies |
+| **Overly permissive** | MEDIUM | Broad wildcards (e.g., `s3:*` on `*`) |
+
+#### Output
+
+**No issues:**
+```
+✅ No security issues detected
+```
+
+**Issues found (exit code 1):**
+```
+Security Issues Found:
+⚠️  3 principals have full admin access
+⚠️  2 resources allow public access
+
+Details:
+  Admin Access:
+    - arn:aws:iam::123456789012:user/alice
+    - arn:aws:iam::123456789012:role/AdminRole
+```
+
+**Use cases:**
+- CI/CD policy validation gates
+- Pre-deployment security checks
+- Automated security audits
+- Policy linting in development
+
+---
+
+### Policy File Format
+
+All `simulate` commands use JSON files containing `CollectionResult` data:
+
+```json
+{
+  "AccountID": "123456789012",
+  "CollectedAt": "2025-01-13T10:00:00Z",
+  "Principals": [
+    {
+      "ARN": "arn:aws:iam::123456789012:user/alice",
+      "Type": "user",
+      "Name": "alice",
+      "Policies": [...]
+    }
+  ],
+  "Resources": [
+    {
+      "ARN": "arn:aws:s3:::my-bucket",
+      "Type": "s3",
+      "ResourcePolicy": {...}
+    }
+  ]
+}
+```
+
+**Generate policy files:**
+```bash
+# From AWS
+aws-access-map collect -o policies.json
+
+# For testing, create manually or modify existing files
+```
+
+---
+
+### CI/CD Integration Example
+
+```yaml
+# .github/workflows/iam-validation.yml
+name: Validate IAM Policy Changes
+
+on:
+  pull_request:
+    paths:
+      - 'iam-policies/**'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Download aws-access-map
+        run: |
+          curl -L https://github.com/pfrederiksen/aws-access-map/releases/latest/download/aws-access-map-linux-amd64 -o aws-access-map
+          chmod +x aws-access-map
+
+      - name: Collect current prod policies
+        run: ./aws-access-map collect -o prod-current.json
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Simulate proposed changes
+        run: |
+          ./aws-access-map simulate diff \
+            --before prod-current.json \
+            --after iam-policies/proposed.json \
+            --action "*" > diff-output.txt
+          cat diff-output.txt >> $GITHUB_STEP_SUMMARY
+
+      - name: Validate security
+        run: ./aws-access-map simulate validate --data iam-policies/proposed.json
+```
+
+---
+
 ## cache
 
 Manage cached AWS collection data.
@@ -548,8 +898,10 @@ aws-access-map who-can "*" --action "*" --format json | \
 ### Performance
 
 1. **Use caching** - Default behavior uses cache automatically
-2. **Collect once, query many** - Collection is slow (~2-3s), queries are fast (<100ms)
-3. **Multi-account** - Collection is parallelized across accounts
+2. **Incremental mode** - Use `--incremental` for 10x speedup on large accounts (v0.7.0)
+3. **Collect once, query many** - Collection is slow (~2-3s), queries are fast (<100ms)
+4. **Multi-account** - Collection is parallelized across accounts
+5. **Local simulation** - Use `simulate` commands to test without AWS API calls
 
 ### Security
 

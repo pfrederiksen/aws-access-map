@@ -187,6 +187,11 @@ func findLatestCacheFile(cacheDir, accountID string) (string, error) {
 			continue
 		}
 
+		// Skip metadata files (they have a different format)
+		if strings.HasSuffix(name, "-metadata.json") {
+			continue
+		}
+
 		// Get file info to check modification time
 		filePath := filepath.Join(cacheDir, name)
 		info, err := os.Stat(filePath)
@@ -212,7 +217,7 @@ func clearAccountCache(cacheDir, accountID string) error {
 		return fmt.Errorf("failed to read cache directory: %w", err)
 	}
 
-	// Delete all cache files for this account
+	// Delete all cache files for this account (but preserve metadata files)
 	prefix := accountID + "-"
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -221,6 +226,11 @@ func clearAccountCache(cacheDir, accountID string) error {
 
 		name := entry.Name()
 		if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+
+		// Skip metadata files (we want to keep them for incremental updates)
+		if strings.HasSuffix(name, "-metadata.json") {
 			continue
 		}
 

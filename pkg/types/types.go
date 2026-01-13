@@ -11,6 +11,7 @@ type Principal struct {
 	Policies            []PolicyDocument
 	TrustPolicy         *PolicyDocument
 	PermissionsBoundary *PolicyDocument
+	GroupMemberships    []string // Group ARNs this principal belongs to (for users)
 }
 
 // PrincipalType represents the type of principal
@@ -44,6 +45,9 @@ const (
 	ResourceTypeSNS           ResourceType = "sns"
 	ResourceTypeSecretsManager ResourceType = "secretsmanager"
 	ResourceTypeLambda        ResourceType = "lambda"
+	ResourceTypeAPIGateway    ResourceType = "apigateway"
+	ResourceTypeECR           ResourceType = "ecr"
+	ResourceTypeEventBridge   ResourceType = "eventbridge"
 )
 
 // PolicyDocument represents an AWS IAM policy document

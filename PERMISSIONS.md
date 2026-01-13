@@ -27,6 +27,11 @@ These permissions are required for basic functionality (collecting IAM principal
         "iam:ListRolePolicies",
         "iam:GetRolePolicy",
         "iam:ListAttachedRolePolicies",
+        "iam:ListGroups",
+        "iam:GetGroup",
+        "iam:GetGroupPolicy",
+        "iam:ListGroupPolicies",
+        "iam:ListAttachedGroupPolicies",
         "iam:GetPolicy",
         "iam:GetPolicyVersion"
       ],
@@ -86,6 +91,41 @@ To collect resource-based policies (S3, KMS, SQS, SNS, Secrets Manager), add the
       "Action": [
         "secretsmanager:ListSecrets",
         "secretsmanager:GetResourcePolicy"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "LambdaResourcePolicyAccess",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:ListFunctions",
+        "lambda:GetPolicy"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "APIGatewayResourcePolicyAccess",
+      "Effect": "Allow",
+      "Action": [
+        "apigateway:GET"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ECRResourcePolicyAccess",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:DescribeRepositories",
+        "ecr:GetRepositoryPolicy"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "EventBridgeResourcePolicyAccess",
+      "Effect": "Allow",
+      "Action": [
+        "events:ListEventBuses",
+        "events:DescribeEventBus"
       ],
       "Resource": "*"
     }
@@ -243,6 +283,11 @@ Here's a complete IAM policy with all permissions for full `aws-access-map` func
         "iam:ListRolePolicies",
         "iam:GetRolePolicy",
         "iam:ListAttachedRolePolicies",
+        "iam:ListGroups",
+        "iam:GetGroup",
+        "iam:GetGroupPolicy",
+        "iam:ListGroupPolicies",
+        "iam:ListAttachedGroupPolicies",
         "iam:GetPolicy",
         "iam:GetPolicyVersion"
       ],
@@ -261,7 +306,14 @@ Here's a complete IAM policy with all permissions for full `aws-access-map` func
         "sns:ListTopics",
         "sns:GetTopicAttributes",
         "secretsmanager:ListSecrets",
-        "secretsmanager:GetResourcePolicy"
+        "secretsmanager:GetResourcePolicy",
+        "lambda:ListFunctions",
+        "lambda:GetPolicy",
+        "apigateway:GET",
+        "ecr:DescribeRepositories",
+        "ecr:GetRepositoryPolicy",
+        "events:ListEventBuses",
+        "events:DescribeEventBus"
       ],
       "Resource": "*"
     },

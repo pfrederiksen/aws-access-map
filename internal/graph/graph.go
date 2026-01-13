@@ -248,6 +248,37 @@ func (g *Graph) CanAccess(principalARN, action, resourceARN string, ctx ...*cond
 		}
 	}
 
+	// STEP 3.5: Check for explicit deny from group policies (deny always wins)
+	// Users inherit deny rules from their groups
+	if principal, exists := g.principals[principalARN]; exists {
+		if len(principal.GroupMemberships) > 0 {
+			for _, groupARN := range principal.GroupMemberships {
+				// Check if this group has any deny rules
+				if actionMap, ok := g.denies[groupARN]; ok {
+					for actionPattern, denyEdges := range actionMap {
+						if policy.MatchesAction(actionPattern, action) {
+							for _, edge := range denyEdges {
+								if matchesPattern(edge.ResourceARN, resourceARN) {
+									// Evaluate conditions
+									matched, err := conditions.Evaluate(edge.Conditions, evalCtx)
+									if err != nil {
+										log.Printf("Warning: Failed to evaluate deny condition for group %s on %s: %v (assuming deny applies)",
+											groupARN, resourceARN, err)
+										return false
+									}
+									if matched {
+										// Deny from group - explicit deny wins
+										return false
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// STEP 4: Check for explicit allow from identity policies
 	// Check for allow - also need to check action patterns
 	if actionMap, ok := g.principalActions[principalARN]; ok {
@@ -270,6 +301,20 @@ func (g *Graph) CanAccess(principalARN, action, resourceARN string, ctx ...*cond
 							return true
 						}
 					}
+				}
+			}
+		}
+	}
+
+	// STEP 4.5: Check group memberships (users inherit group permissions)
+	// If the principal is a user, check if any of their groups grant access
+	if principal, exists := g.principals[principalARN]; exists {
+		if len(principal.GroupMemberships) > 0 {
+			for _, groupARN := range principal.GroupMemberships {
+				// Recursively check if the group has access
+				// Pass the evaluation context through to maintain condition checks
+				if g.CanAccess(groupARN, action, resourceARN, evalCtx) {
+					return true // User inherits permission from group
 				}
 			}
 		}

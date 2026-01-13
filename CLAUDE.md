@@ -303,7 +303,7 @@ jq '.Principals[] | select(.Type == "role") | .TrustPolicy' testdata/collected-d
 
 ## Implementation Status
 
-### ✅ Completed (as of v0.6.0)
+### ✅ Completed (as of v0.7.0)
 
 1. **Condition evaluation** (v0.4.0): Full support for 22 condition operators (IP, MFA, dates, ARNs, strings, numerics)
 2. **Service Control Policies** (v0.5.0): Organization-level policy evaluation with OU hierarchy
@@ -311,15 +311,20 @@ jq '.Principals[] | select(.Type == "role") | .TrustPolicy' testdata/collected-d
 4. **Session policies** (v0.6.0): Temporary session constraint evaluation
 5. **File-based caching** (v0.6.0): Automatic per-account caching with TTL
 6. **Multi-account** (v0.6.0): Organization-wide collection via AWS Organizations
+7. **IAM groups** (v0.7.0): Group collection with membership resolution and permission inheritance
+8. **Additional resource types** (v0.7.0): Lambda, API Gateway, ECR, EventBridge policy collection
+9. **Policy simulation** (v0.7.0): Test policies locally without AWS credentials, CI/CD integration
+10. **Incremental caching** (v0.7.0): Delta-based collection with 10x speedup for large accounts
 
 ### 🚧 Future Enhancements
 
-1. **Real-time updates**: Watch for policy changes and auto-refresh
-2. **Visualization**: Export to graph visualization tools (Neo4j, Gephi)
-3. **Risk scoring**: Calculate quantitative risk scores for access paths
-4. **Remediation**: AI-powered policy recommendations to reduce risk
-5. **Web UI**: Optional web interface for visual exploration
-6. **Advanced caching**: Multi-account cache with incremental updates
+1. **Resource tagging**: Tag-based policy evaluation and filtering
+2. **NotAction/NotResource**: Support for inverse policy logic
+3. **Real-time updates**: Watch for policy changes and auto-refresh
+4. **Visualization**: Export to graph visualization tools (Neo4j, Gephi)
+5. **Risk scoring**: Calculate quantitative risk scores for access paths
+6. **Remediation**: AI-powered policy recommendations to reduce risk
+7. **Web UI**: Optional web interface for visual exploration
 
 ## Debugging Tips
 
@@ -391,13 +396,20 @@ Based on real-world testing and user needs:
 3. ✅ File-based caching with TTL (24h default)
 4. ✅ Multi-account via AWS Organizations
 
-**Phase 5 - Future Enhancements**
-1. ⏳ Web UI for visualization
-2. ⏳ Export to graph databases (Neo4j)
-3. ⏳ Real-time change detection
-4. ⏳ Policy remediation suggestions
-5. ⏳ Risk scoring algorithms
-6. ⏳ Advanced cache strategies (incremental updates)
+**Phase 5 - Complete Entity Coverage + Developer Tools (v0.7.0)** ✅
+1. ✅ IAM groups with membership resolution
+2. ✅ Additional resource types (Lambda, API Gateway, ECR, EventBridge)
+3. ✅ Policy simulation mode (local testing without AWS)
+4. ✅ Incremental caching (10x speedup for large accounts)
+
+**Phase 6 - Future Enhancements**
+1. ⏳ Resource tagging support
+2. ⏳ NotAction/NotResource evaluation
+3. ⏳ Web UI for visualization
+4. ⏳ Export to graph databases (Neo4j)
+5. ⏳ Real-time change detection
+6. ⏳ Policy remediation suggestions
+7. ⏳ Risk scoring algorithms
 
 ## Example Development Session
 

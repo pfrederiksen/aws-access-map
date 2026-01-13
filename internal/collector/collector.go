@@ -105,6 +105,16 @@ func (c *Collector) Collect(ctx context.Context) (*types.CollectionResult, error
 	}
 	result.Principals = append(result.Principals, roles...)
 
+	// Collect IAM groups
+	groups, groupMemberships, err := c.collectGroups(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to collect groups: %w", err)
+	}
+	result.Principals = append(result.Principals, groups...)
+
+	// Resolve group memberships for users
+	c.resolveGroupMemberships(users, groupMemberships)
+
 	// Collect S3 resources
 	s3Resources, err := c.collectS3Resources(ctx)
 	if err != nil {
@@ -139,6 +149,34 @@ func (c *Collector) Collect(ctx context.Context) (*types.CollectionResult, error
 		return nil, fmt.Errorf("failed to collect Secrets Manager resources: %w", err)
 	}
 	result.Resources = append(result.Resources, secretsResources...)
+
+	// Collect Lambda functions
+	lambdaResources, err := c.collectLambdaResources(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to collect Lambda resources: %w", err)
+	}
+	result.Resources = append(result.Resources, lambdaResources...)
+
+	// Collect API Gateway REST APIs
+	apiGatewayResources, err := c.collectAPIGatewayResources(ctx, accountID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to collect API Gateway resources: %w", err)
+	}
+	result.Resources = append(result.Resources, apiGatewayResources...)
+
+	// Collect ECR repositories
+	ecrResources, err := c.collectECRResources(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to collect ECR resources: %w", err)
+	}
+	result.Resources = append(result.Resources, ecrResources...)
+
+	// Collect EventBridge event buses
+	eventBridgeResources, err := c.collectEventBridgeResources(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to collect EventBridge resources: %w", err)
+	}
+	result.Resources = append(result.Resources, eventBridgeResources...)
 
 	// Collect Service Control Policies (if enabled)
 	if c.includeSCPs {

@@ -19,7 +19,7 @@ import (
 
 var (
 	// Version information
-	version = "0.6.0"
+	version = "0.7.0"
 
 	// Global flags
 	profile string
@@ -71,6 +71,7 @@ to answer access questions about your AWS infrastructure.`,
 	rootCmd.AddCommand(pathCmd())
 	rootCmd.AddCommand(reportCmd())
 	rootCmd.AddCommand(cacheCmd())
+	rootCmd.AddCommand(simulateCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -113,10 +114,11 @@ func versionCmd() *cobra.Command {
 
 func collectCmd() *cobra.Command {
 	var (
-		outputFile  string
-		includeSCPs bool
-		allAccounts bool
-		roleName    string
+		outputFile   string
+		includeSCPs  bool
+		allAccounts  bool
+		roleName     string
+		incremental  bool
 	)
 
 	cmd := &cobra.Command{
@@ -124,7 +126,7 @@ func collectCmd() *cobra.Command {
 		Short: "Collect IAM and resource policy data from AWS",
 		Long:  `Fetches IAM policies, resource policies, SCPs, and role trust policies from your AWS account or entire organization.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCollect(outputFile, includeSCPs, allAccounts, roleName)
+			return runCollect(outputFile, includeSCPs, allAccounts, roleName, incremental)
 		},
 	}
 
@@ -132,6 +134,7 @@ func collectCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&includeSCPs, "include-scps", false, "Collect Service Control Policies from AWS Organizations (requires organizations:ListPolicies permission)")
 	cmd.Flags().BoolVar(&allAccounts, "all-accounts", false, "Collect from all accounts in the organization (requires Organizations access)")
 	cmd.Flags().StringVar(&roleName, "role-name", "OrganizationAccountAccessRole", "Role name to assume in member accounts (only with --all-accounts)")
+	cmd.Flags().BoolVar(&incremental, "incremental", false, "Use incremental caching (faster for large accounts with few changes)")
 
 	return cmd
 }
@@ -310,7 +313,7 @@ func cacheInfoCmd() *cobra.Command {
 	return cmd
 }
 
-func runCollect(outputFile string, includeSCPs bool, allAccounts bool, roleName string) error {
+func runCollect(outputFile string, includeSCPs bool, allAccounts bool, roleName string, incremental bool) error {
 	// Validate format
 	if format != "text" && format != "json" {
 		return fmt.Errorf("invalid format: %s (must be 'text' or 'json')", format)
@@ -400,20 +403,54 @@ func runCollect(outputFile string, includeSCPs bool, allAccounts bool, roleName 
 
 	// If no cached result, collect fresh data
 	if result == nil {
-		fmt.Fprintln(logOutput, "Collecting AWS IAM data...")
+		var stats *cache.IncrementalStats
 
-		result, err = col.Collect(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to collect data: %w", err)
+		// Check if incremental mode should be used
+		if incremental && accountID != "" {
+			// Try to load previous cache for incremental collection
+			shouldUseIncremental, previousCache, err := cache.ShouldUseIncremental(accountID, cacheTTL)
+			if err != nil && debug {
+				fmt.Fprintf(logOutput, "DEBUG: Incremental check error: %v\n", err)
+			}
+
+			if shouldUseIncremental && previousCache != nil {
+				fmt.Fprintln(logOutput, "Using incremental collection (delta mode)...")
+				result, stats, err = cache.IncrementalCollect(ctx, col, previousCache)
+				if err != nil {
+					return fmt.Errorf("failed to collect data incrementally: %w", err)
+				}
+
+				// Print incremental stats if debug
+				if debug && stats != nil {
+					cache.PrintIncrementalStats(stats, debug)
+				}
+			} else {
+				if debug {
+					fmt.Fprintln(logOutput, "DEBUG: No previous cache found, performing full collection...")
+				}
+				fmt.Fprintln(logOutput, "Collecting AWS IAM data...")
+				result, err = col.Collect(ctx)
+				if err != nil {
+					return fmt.Errorf("failed to collect data: %w", err)
+				}
+			}
+		} else {
+			// Normal full collection
+			fmt.Fprintln(logOutput, "Collecting AWS IAM data...")
+			result, err = col.Collect(ctx)
+			if err != nil {
+				return fmt.Errorf("failed to collect data: %w", err)
+			}
 		}
 
-		// Save to cache (unless --no-cache)
+		// Save to cache with metadata (unless --no-cache)
 		if !noCache && result.AccountID != "" {
-			if err := cache.Save(result.AccountID, result); err != nil {
+			// Use SaveWithMetadata to support incremental mode
+			if err := cache.SaveWithMetadata(result.AccountID, result); err != nil {
 				// Log warning but don't fail
 				fmt.Fprintf(logOutput, "Warning: failed to save to cache: %v\n", err)
 			} else if debug {
-				fmt.Fprintf(logOutput, "DEBUG: Saved to cache for account %s\n", result.AccountID)
+				fmt.Fprintf(logOutput, "DEBUG: Saved to cache with metadata for account %s\n", result.AccountID)
 			}
 		}
 	}

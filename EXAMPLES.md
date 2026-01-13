@@ -115,6 +115,192 @@ jq '.Principals[] | select(.Type == "role" and .TrustPolicy != null) | {
 }' aws-access-data.json | grep -B5 "arn:aws:iam::[0-9]"
 ```
 
+## IAM Groups (v0.7.0)
+
+### Find users with access via groups
+```bash
+# Users inherit permissions from groups
+./build/aws-access-map who-can "arn:aws:s3:::*" --action "s3:GetObject"
+
+# Example output:
+#   alice (user) - via group: Developers
+#   bob (user) - via group: Developers
+#   Developers (group)
+```
+
+### Check group membership
+```bash
+# List all groups
+jq '.Principals[] | select(.Type == "group") | .Name' aws-access-data.json
+
+# Find users in specific group
+jq '.Principals[] | select(.GroupMemberships[]? | contains("Developers")) | .Name' aws-access-data.json
+```
+
+### Verify group deny rules
+```bash
+# Group denies override user allows
+# If group has Deny for s3:DeleteObject, user won't have access even if their policy allows it
+./build/aws-access-map who-can "arn:aws:s3:::bucket/*" --action "s3:DeleteObject"
+```
+
+## Serverless Access Patterns (v0.7.0)
+
+### Lambda function access
+```bash
+# Who can invoke this Lambda?
+./build/aws-access-map who-can \
+  "arn:aws:lambda:us-east-1:123456789012:function:my-function" \
+  --action "lambda:InvokeFunction"
+
+# Common use case: Debug "User is not authorized to perform: lambda:InvokeFunction"
+```
+
+### API Gateway access
+```bash
+# Who can call this API?
+./build/aws-access-map who-can \
+  "arn:aws:execute-api:us-east-1:123456789012:abc123/*/*/*" \
+  --action "execute-api:Invoke"
+```
+
+### ECR repository access
+```bash
+# Who can pull container images?
+./build/aws-access-map who-can \
+  "arn:aws:ecr:us-east-1:123456789012:repository/my-app" \
+  --action "ecr:BatchGetImage"
+
+# Common use case: CI/CD pipeline can't pull images
+```
+
+### EventBridge event bus access
+```bash
+# Who can publish events?
+./build/aws-access-map who-can \
+  "arn:aws:events:us-east-1:123456789012:event-bus/custom-bus" \
+  --action "events:PutEvents"
+```
+
+## Policy Testing & Simulation (v0.7.0)
+
+### Test policy before deployment
+```bash
+# 1. Collect current policies
+./build/aws-access-map collect -o prod-current.json
+
+# 2. Create test policy
+cat > test-policy.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": "s3:*",
+    "Resource": "*"
+  }]
+}
+EOF
+
+# 3. Test without deploying to AWS
+./build/aws-access-map simulate test \
+  --data prod-current.json \
+  --add-policy test-policy.json \
+  --principal "arn:aws:iam::123456789012:role/MyRole"
+
+# Output shows if policy is overly permissive
+```
+
+### Compare policy versions
+```bash
+# Save before snapshot
+./build/aws-access-map collect -o before.json
+
+# Make AWS changes...
+
+# Save after snapshot
+./build/aws-access-map collect -o after.json
+
+# Compare
+./build/aws-access-map simulate diff \
+  --before before.json \
+  --after after.json \
+  --action "*"
+
+# Output shows who gained/lost access
+```
+
+### CI/CD policy validation
+```bash
+#!/bin/bash
+# validate-policies.sh
+
+# Validate no security issues (exits 1 if problems found)
+./build/aws-access-map simulate validate --data proposed-policies.json
+
+if [ $? -ne 0 ]; then
+  echo "❌ Security issues detected in policies"
+  exit 1
+fi
+
+echo "✅ Policies validated successfully"
+```
+
+### Local development without AWS
+```bash
+# Test policies on your laptop (no AWS credentials needed)
+./build/aws-access-map simulate who-can "*" --action "s3:*" \
+  --data test-policies.json
+```
+
+## Incremental Collection (v0.7.0)
+
+### Faster collection for large accounts
+```bash
+# First run: full collection (baseline)
+time ./build/aws-access-map collect --no-cache -o data.json
+# Time: 30 seconds (1000 resources)
+
+# Subsequent runs: incremental (delta only)
+time ./build/aws-access-map collect --incremental -o data.json
+# Time: 3 seconds (no changes)
+
+# After AWS change
+aws s3api put-bucket-policy --bucket my-bucket --policy file://policy.json
+
+# Incremental detects and fetches only changed resource
+time ./build/aws-access-map collect --incremental -o data.json
+# Time: 5 seconds (1 changed resource)
+```
+
+### View incremental statistics
+```bash
+# Enable debug to see what changed
+./build/aws-access-map collect --incremental --debug
+
+# Example output:
+# === Incremental Collection Stats ===
+# Mode: incremental
+# Duration: 3.45 seconds
+# Resources Fetched: 10
+# Resources Cached: 990
+# Change Percentage: 1.00%
+```
+
+### Use in CI/CD for speed
+```bash
+#!/bin/bash
+# fast-ci-check.sh
+
+# First CI run: full collection
+./build/aws-access-map collect --no-cache -o baseline.json
+
+# Subsequent CI runs: incremental (10x faster)
+./build/aws-access-map collect --incremental -o data.json
+
+# Run security checks
+./build/aws-access-map who-can "*" --action "*"
+```
+
 ## CI/CD Integration
 
 ### Validate deployments don't grant excessive permissions

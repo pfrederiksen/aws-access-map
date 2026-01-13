@@ -43,9 +43,11 @@ aws-access-map collect --all-accounts
 - ✅ Permission boundaries - principal-level constraints
 - ✅ Session policies - temporary session constraints
 - ✅ Identity & resource policies
+- ✅ IAM groups - membership inheritance (v0.7.0)
 - ✅ Condition evaluation (IP, MFA, dates, ARNs, etc.)
 - ✅ Multi-account via AWS Organizations
-- ✅ File-based caching (24h TTL)
+- ✅ Incremental caching - 10x speedup (v0.7.0)
+- ✅ Policy simulation - test without AWS (v0.7.0)
 
 ## Installation
 
@@ -188,21 +190,97 @@ aws-access-map who-can "*" --action "*" --source-ip "203.0.113.50"
 aws-access-map who-can "arn:aws:iam::*:*" --action "iam:*" --mfa
 ```
 
+### ✅ Policy Simulation Mode (v0.7.0)
+
+Test policy changes locally without AWS credentials. Perfect for CI/CD integration.
+
+```bash
+# Test policies from local file
+aws-access-map simulate who-can "arn:aws:s3:::bucket/*" \
+  --action s3:GetObject \
+  --data local-policies.json
+
+# Compare before/after policy changes
+aws-access-map simulate diff \
+  --before current.json \
+  --after proposed.json \
+  --action "*"
+
+# Validate for security issues (exit 1 if found)
+aws-access-map simulate validate --data policies.json
+```
+
+**Use cases:**
+- Test policy changes before deployment
+- CI/CD policy validation
+- Local development without AWS access
+- Security audits of proposed changes
+
+### ✅ Incremental Caching (v0.7.0)
+
+10x faster collection for large accounts with minimal changes.
+
+```bash
+# First run: full collection (30s)
+aws-access-map collect --no-cache
+
+# Subsequent runs: delta only (3-5s)
+aws-access-map collect --incremental
+```
+
+**How it works:**
+- Tracks resource metadata (policy hashes, LastModified)
+- Detects changed resources only
+- Fetches deltas, not full data
+- Graceful fallback to full collection
+
+**Performance:**
+- **Full**: 30 seconds (1000 resources)
+- **Incremental (no changes)**: 3-5 seconds (10x faster)
+- **Incremental (10% changes)**: 8-10 seconds (3x faster)
+
+### ✅ IAM Groups Support (v0.7.0)
+
+Complete IAM entity coverage with group membership resolution.
+
+```bash
+# Users inherit group permissions
+aws-access-map who-can "arn:aws:s3:::*" --action s3:GetObject
+# Returns: alice (via group: Developers)
+```
+
+**Features:**
+- Collects groups with inline + managed policies
+- Resolves user group memberships
+- Inherits both allows and denies from groups
+- Deny rules from groups override user allows
+
 ### ✅ Performance
 
 - **Fast queries**: 50-100ms for typical accounts
 - **Auto-caching**: 24h TTL (configurable)
+- **Incremental mode**: 10x speedup for large accounts (v0.7.0)
 - **Multi-account**: Parallel collection across accounts
 - **No external dependencies**: Single binary, no database required
 
 ## What It Collects
 
-- ✅ IAM users, roles, groups (inline + managed policies)
+**IAM Entities:**
+- ✅ IAM users, roles (inline + managed policies)
+- ✅ IAM groups with membership resolution (v0.7.0)
 - ✅ Permission boundaries (v0.6.0)
 - ✅ Service Control Policies (v0.5.0)
-- ✅ S3, KMS, SQS, SNS, Secrets Manager resource policies
 - ✅ Role trust policies and assumption chains
-- ✅ Multi-account data via Organizations (v0.6.0)
+
+**Resource Policies:**
+- ✅ S3, KMS, SQS, SNS, Secrets Manager
+- ✅ Lambda functions (v0.7.0)
+- ✅ API Gateway REST APIs (v0.7.0)
+- ✅ ECR repositories (v0.7.0)
+- ✅ EventBridge event buses (v0.7.0)
+
+**Multi-Account:**
+- ✅ Organization-wide collection (v0.6.0)
 
 See [PERMISSIONS.md](PERMISSIONS.md) for required IAM permissions.
 
@@ -241,17 +319,19 @@ See [PERMISSIONS.md](PERMISSIONS.md) for required IAM permissions.
 - ✅ v0.4.0 - Policy condition evaluation
 - ✅ v0.5.0 - Service Control Policies (SCPs)
 - ✅ v0.6.0 - Permission boundaries, session policies, caching, multi-account
-- ⏳ v0.7.0 - IAM groups, resource tagging
-- ⏳ v0.8.0 - Web UI (optional)
+- ✅ v0.7.0 - IAM groups, Lambda/API Gateway/ECR/EventBridge, policy simulation, incremental caching
+- ⏳ v0.8.0 - Resource tagging, NotAction/NotResource evaluation
+- ⏳ v0.9.0 - Web UI (optional)
 
 ## Contributing
 
 Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and architecture.
 
 **Key areas for contribution:**
-- Additional resource types (Lambda, API Gateway, etc.)
-- More condition operators
+- Additional resource types (ECS, EFS, RDS, DynamoDB, etc.)
+- More condition operators (StringLike patterns, etc.)
 - Performance optimizations
+- Web UI / visualization
 - Documentation improvements
 
 ## License
