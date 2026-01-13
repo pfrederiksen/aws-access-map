@@ -34,6 +34,9 @@ type Graph struct {
 
 	// denies[principalARN][action] = []PermissionEdge
 	denies map[string]map[string][]PermissionEdge
+
+	// Organization-level constraints
+	scps []types.PolicyDocument // Service Control Policies from AWS Organizations
 }
 
 // New creates a new empty graph
@@ -50,6 +53,9 @@ func New() *Graph {
 // Build constructs the graph from collected AWS data
 func Build(collection *types.CollectionResult) (*Graph, error) {
 	g := New()
+
+	// Store SCPs (evaluated at query time, not preprocessed into edges)
+	g.scps = collection.SCPs
 
 	// Add all principals
 	for _, principal := range collection.Principals {
@@ -191,7 +197,13 @@ func (g *Graph) CanAccess(principalARN, action, resourceARN string, ctx ...*cond
 		evalCtx = conditions.NewDefaultContext()
 	}
 
-	// Check for explicit deny first (deny always wins)
+	// STEP 0: Check SCPs (organization-level deny)
+	// SCPs are checked FIRST before any other policies
+	if g.isBlockedBySCP(principalARN, action, resourceARN, evalCtx) {
+		return false // SCP denies this action organization-wide
+	}
+
+	// STEP 1: Check for explicit deny from identity/resource policies (deny always wins)
 	// Need to check all action patterns, not just exact match
 	if actionMap, ok := g.denies[principalARN]; ok {
 		for actionPattern, denyEdges := range actionMap {
@@ -408,4 +420,81 @@ func extractPrincipals(principal interface{}) []string {
 // matchesPattern checks if a resource ARN matches a pattern (with wildcards)
 func matchesPattern(pattern, arn string) bool {
 	return policy.MatchesResource(pattern, arn)
+}
+
+// isBlockedBySCP checks if a Service Control Policy denies the action
+// SCPs are restrictive - they can only deny, never allow
+// If NO SCP explicitly denies, the action is allowed (from SCP perspective)
+func (g *Graph) isBlockedBySCP(principalARN, action, resourceARN string, ctx *conditions.EvaluationContext) bool {
+	// Root user is not affected by SCPs (AWS special case)
+	if isRootUser(principalARN) {
+		return false
+	}
+
+	// Check each SCP for explicit deny
+	for _, scp := range g.scps {
+		for _, stmt := range scp.Statements {
+			// SCPs use Deny effect explicitly
+			if stmt.Effect != types.EffectDeny {
+				// Allow statements in SCPs don't grant access, skip
+				continue
+			}
+
+			// Check if this SCP deny applies to the action
+			actions := normalizeToSlice(stmt.Action)
+			resources := normalizeToSlice(stmt.Resource)
+
+			// Check if action matches
+			actionMatches := false
+			for _, scpAction := range actions {
+				if policy.MatchesAction(scpAction, action) {
+					actionMatches = true
+					break
+				}
+			}
+
+			if !actionMatches {
+				continue
+			}
+
+			// Check if resource matches
+			resourceMatches := false
+			for _, scpResource := range resources {
+				if matchesPattern(scpResource, resourceARN) {
+					resourceMatches = true
+					break
+				}
+			}
+
+			if !resourceMatches {
+				continue
+			}
+
+			// Check conditions if present
+			if len(stmt.Condition) > 0 {
+				matched, err := conditions.Evaluate(stmt.Condition, ctx)
+				if err != nil {
+					// Fail closed for SCP conditions (security-first)
+					log.Printf("Warning: Failed to evaluate SCP condition (policy %s): %v (assuming deny applies)", scp.ID, err)
+					return true
+				}
+				if !matched {
+					// Conditions didn't match, deny doesn't apply
+					continue
+				}
+			}
+
+			// SCP explicitly denies this action
+			return true
+		}
+	}
+
+	// No SCP denied the action
+	return false
+}
+
+// isRootUser checks if the ARN represents the root user
+// Root user ARN format: arn:aws:iam::123456789012:root
+func isRootUser(arn string) bool {
+	return len(arn) > 0 && (arn[len(arn)-5:] == ":root" || arn[len(arn)-6:] == ":root/")
 }
