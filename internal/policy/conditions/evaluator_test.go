@@ -2,6 +2,7 @@ package conditions
 
 import (
 	"testing"
+	"time"
 )
 
 func TestEvaluate_EmptyCondition(t *testing.T) {
@@ -510,9 +511,7 @@ func TestEvaluateOperator_NotImplemented(t *testing.T) {
 	operands := map[string]interface{}{"key": "value"}
 
 	notImplemented := []string{
-		"NumericEquals",
-		"DateGreaterThan",
-		"ArnEquals",
+		// All operators now implemented
 	}
 
 	for _, op := range notImplemented {
@@ -520,6 +519,663 @@ func TestEvaluateOperator_NotImplemented(t *testing.T) {
 			_, err := evaluateOperator(op, operands, ctx)
 			if err == nil {
 				t.Errorf("expected error for unimplemented operator: %s", op)
+			}
+		})
+	}
+}
+
+func TestEvaluateNumericEquals(t *testing.T) {
+	tests := []struct {
+		name     string
+		operands map[string]interface{}
+		ctx      *EvaluationContext
+		want     bool
+		wantErr  bool
+	}{
+		{
+			name: "Equal integers",
+			operands: map[string]interface{}{
+				"s3:max-keys": 100,
+			},
+			ctx: &EvaluationContext{
+				NumericContext: map[string]float64{
+					"s3:max-keys": 100,
+				},
+			},
+			want: true,
+		},
+		{
+			name: "Equal floats",
+			operands: map[string]interface{}{
+				"custom:value": 42.5,
+			},
+			ctx: &EvaluationContext{
+				NumericContext: map[string]float64{
+					"custom:value": 42.5,
+				},
+			},
+			want: true,
+		},
+		{
+			name: "Not equal",
+			operands: map[string]interface{}{
+				"s3:max-keys": 100,
+			},
+			ctx: &EvaluationContext{
+				NumericContext: map[string]float64{
+					"s3:max-keys": 50,
+				},
+			},
+			want: false,
+		},
+		{
+			name: "Missing key in context",
+			operands: map[string]interface{}{
+				"s3:max-keys": 100,
+			},
+			ctx:  &EvaluationContext{NumericContext: make(map[string]float64)},
+			want: false,
+		},
+		{
+			name: "String number conversion",
+			operands: map[string]interface{}{
+				"custom:value": "123.45",
+			},
+			ctx: &EvaluationContext{
+				NumericContext: map[string]float64{
+					"custom:value": 123.45,
+				},
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := evaluateNumericEquals(tt.operands, tt.ctx)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("evaluateNumericEquals() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("evaluateNumericEquals() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEvaluateNumericLessThan(t *testing.T) {
+	tests := []struct {
+		name     string
+		operands map[string]interface{}
+		ctx      *EvaluationContext
+		want     bool
+	}{
+		{
+			name: "Less than",
+			operands: map[string]interface{}{
+				"s3:max-keys": 100,
+			},
+			ctx: &EvaluationContext{
+				NumericContext: map[string]float64{
+					"s3:max-keys": 50,
+				},
+			},
+			want: true,
+		},
+		{
+			name: "Equal (not less)",
+			operands: map[string]interface{}{
+				"s3:max-keys": 100,
+			},
+			ctx: &EvaluationContext{
+				NumericContext: map[string]float64{
+					"s3:max-keys": 100,
+				},
+			},
+			want: false,
+		},
+		{
+			name: "Greater (not less)",
+			operands: map[string]interface{}{
+				"s3:max-keys": 100,
+			},
+			ctx: &EvaluationContext{
+				NumericContext: map[string]float64{
+					"s3:max-keys": 150,
+				},
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, _ := evaluateNumericLessThan(tt.operands, tt.ctx)
+			if got != tt.want {
+				t.Errorf("evaluateNumericLessThan() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEvaluateNumericGreaterThan(t *testing.T) {
+	tests := []struct {
+		name     string
+		operands map[string]interface{}
+		ctx      *EvaluationContext
+		want     bool
+	}{
+		{
+			name: "Greater than",
+			operands: map[string]interface{}{
+				"ec2:InstanceCount": 10,
+			},
+			ctx: &EvaluationContext{
+				NumericContext: map[string]float64{
+					"ec2:InstanceCount": 20,
+				},
+			},
+			want: true,
+		},
+		{
+			name: "Equal (not greater)",
+			operands: map[string]interface{}{
+				"ec2:InstanceCount": 10,
+			},
+			ctx: &EvaluationContext{
+				NumericContext: map[string]float64{
+					"ec2:InstanceCount": 10,
+				},
+			},
+			want: false,
+		},
+		{
+			name: "Less (not greater)",
+			operands: map[string]interface{}{
+				"ec2:InstanceCount": 10,
+			},
+			ctx: &EvaluationContext{
+				NumericContext: map[string]float64{
+					"ec2:InstanceCount": 5,
+				},
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, _ := evaluateNumericGreaterThan(tt.operands, tt.ctx)
+			if got != tt.want {
+				t.Errorf("evaluateNumericGreaterThan() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEvaluateNumericLessThanEquals(t *testing.T) {
+	tests := []struct {
+		name     string
+		operands map[string]interface{}
+		ctx      *EvaluationContext
+		want     bool
+	}{
+		{
+			name: "Less than",
+			operands: map[string]interface{}{
+				"value": 100,
+			},
+			ctx: &EvaluationContext{
+				NumericContext: map[string]float64{
+					"value": 50,
+				},
+			},
+			want: true,
+		},
+		{
+			name: "Equal",
+			operands: map[string]interface{}{
+				"value": 100,
+			},
+			ctx: &EvaluationContext{
+				NumericContext: map[string]float64{
+					"value": 100,
+				},
+			},
+			want: true,
+		},
+		{
+			name: "Greater (fails)",
+			operands: map[string]interface{}{
+				"value": 100,
+			},
+			ctx: &EvaluationContext{
+				NumericContext: map[string]float64{
+					"value": 150,
+				},
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, _ := evaluateNumericLessThanEquals(tt.operands, tt.ctx)
+			if got != tt.want {
+				t.Errorf("evaluateNumericLessThanEquals() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEvaluateNumericGreaterThanEquals(t *testing.T) {
+	tests := []struct {
+		name     string
+		operands map[string]interface{}
+		ctx      *EvaluationContext
+		want     bool
+	}{
+		{
+			name: "Greater than",
+			operands: map[string]interface{}{
+				"value": 100,
+			},
+			ctx: &EvaluationContext{
+				NumericContext: map[string]float64{
+					"value": 150,
+				},
+			},
+			want: true,
+		},
+		{
+			name: "Equal",
+			operands: map[string]interface{}{
+				"value": 100,
+			},
+			ctx: &EvaluationContext{
+				NumericContext: map[string]float64{
+					"value": 100,
+				},
+			},
+			want: true,
+		},
+		{
+			name: "Less (fails)",
+			operands: map[string]interface{}{
+				"value": 100,
+			},
+			ctx: &EvaluationContext{
+				NumericContext: map[string]float64{
+					"value": 50,
+				},
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, _ := evaluateNumericGreaterThanEquals(tt.operands, tt.ctx)
+			if got != tt.want {
+				t.Errorf("evaluateNumericGreaterThanEquals() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestToFloat64(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   interface{}
+		want    float64
+		wantErr bool
+	}{
+		{"float64", float64(42.5), 42.5, false},
+		{"float32", float32(42.5), 42.5, false},
+		{"int", 42, 42.0, false},
+		{"int32", int32(42), 42.0, false},
+		{"int64", int64(42), 42.0, false},
+		{"string number", "42.5", 42.5, false},
+		{"string integer", "100", 100.0, false},
+		{"invalid string", "not-a-number", 0, true},
+		{"unsupported type", true, 0, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := toFloat64(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("toFloat64() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("toFloat64() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEvaluateDateEquals(t *testing.T) {
+	baseTime := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name     string
+		operands map[string]interface{}
+		ctx      *EvaluationContext
+		want     bool
+		wantErr  bool
+	}{
+		{
+			name: "Equal times",
+			operands: map[string]interface{}{
+				"aws:CurrentTime": "2026-01-15T12:00:00Z",
+			},
+			ctx: &EvaluationContext{
+				CurrentTime: baseTime,
+			},
+			want: true,
+		},
+		{
+			name: "Different times",
+			operands: map[string]interface{}{
+				"aws:CurrentTime": "2026-01-15T13:00:00Z",
+			},
+			ctx: &EvaluationContext{
+				CurrentTime: baseTime,
+			},
+			want: false,
+		},
+		{
+			name: "Unix timestamp equal",
+			operands: map[string]interface{}{
+				"aws:CurrentTime": int64(1768478400), // 2026-01-15T12:00:00Z
+			},
+			ctx: &EvaluationContext{
+				CurrentTime: baseTime,
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := evaluateDateEquals(tt.operands, tt.ctx)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("evaluateDateEquals() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("evaluateDateEquals() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEvaluateDateLessThan(t *testing.T) {
+	baseTime := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name     string
+		operands map[string]interface{}
+		ctx      *EvaluationContext
+		want     bool
+	}{
+		{
+			name: "Before",
+			operands: map[string]interface{}{
+				"aws:CurrentTime": "2026-01-15T13:00:00Z",
+			},
+			ctx: &EvaluationContext{
+				CurrentTime: baseTime,
+			},
+			want: true,
+		},
+		{
+			name: "Equal (not less)",
+			operands: map[string]interface{}{
+				"aws:CurrentTime": "2026-01-15T12:00:00Z",
+			},
+			ctx: &EvaluationContext{
+				CurrentTime: baseTime,
+			},
+			want: false,
+		},
+		{
+			name: "After (not less)",
+			operands: map[string]interface{}{
+				"aws:CurrentTime": "2026-01-15T11:00:00Z",
+			},
+			ctx: &EvaluationContext{
+				CurrentTime: baseTime,
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, _ := evaluateDateLessThan(tt.operands, tt.ctx)
+			if got != tt.want {
+				t.Errorf("evaluateDateLessThan() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEvaluateDateGreaterThan(t *testing.T) {
+	baseTime := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name     string
+		operands map[string]interface{}
+		ctx      *EvaluationContext
+		want     bool
+	}{
+		{
+			name: "After",
+			operands: map[string]interface{}{
+				"aws:CurrentTime": "2026-01-15T11:00:00Z",
+			},
+			ctx: &EvaluationContext{
+				CurrentTime: baseTime,
+			},
+			want: true,
+		},
+		{
+			name: "Equal (not greater)",
+			operands: map[string]interface{}{
+				"aws:CurrentTime": "2026-01-15T12:00:00Z",
+			},
+			ctx: &EvaluationContext{
+				CurrentTime: baseTime,
+			},
+			want: false,
+		},
+		{
+			name: "Before (not greater)",
+			operands: map[string]interface{}{
+				"aws:CurrentTime": "2026-01-15T13:00:00Z",
+			},
+			ctx: &EvaluationContext{
+				CurrentTime: baseTime,
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, _ := evaluateDateGreaterThan(tt.operands, tt.ctx)
+			if got != tt.want {
+				t.Errorf("evaluateDateGreaterThan() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseTime(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   interface{}
+		wantErr bool
+	}{
+		{"RFC3339", "2026-01-15T12:00:00Z", false},
+		{"ISO 8601", "2026-01-15T12:00:00", false},
+		{"Date only", "2026-01-15", false},
+		{"Unix timestamp int64", int64(1736942400), false},
+		{"Unix timestamp int", int(1736942400), false},
+		{"Unix timestamp float", float64(1736942400), false},
+		{"Invalid string", "not-a-date", true},
+		{"Unsupported type", true, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseTime(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("parseTime() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestEvaluateArnEquals(t *testing.T) {
+	tests := []struct {
+		name     string
+		operands map[string]interface{}
+		ctx      *EvaluationContext
+		want     bool
+		wantErr  bool
+	}{
+		{
+			name: "Exact match",
+			operands: map[string]interface{}{
+				"aws:PrincipalArn": "arn:aws:iam::123456789012:user/alice",
+			},
+			ctx: &EvaluationContext{
+				PrincipalARN: "arn:aws:iam::123456789012:user/alice",
+			},
+			want: true,
+		},
+		{
+			name: "No match",
+			operands: map[string]interface{}{
+				"aws:PrincipalArn": "arn:aws:iam::123456789012:user/bob",
+			},
+			ctx: &EvaluationContext{
+				PrincipalARN: "arn:aws:iam::123456789012:user/alice",
+			},
+			want: false,
+		},
+		{
+			name: "Missing context value",
+			operands: map[string]interface{}{
+				"aws:PrincipalArn": "arn:aws:iam::123456789012:user/alice",
+			},
+			ctx:  &EvaluationContext{},
+			want: false,
+		},
+		{
+			name: "Case sensitive",
+			operands: map[string]interface{}{
+				"aws:PrincipalArn": "arn:aws:iam::123456789012:user/Alice",
+			},
+			ctx: &EvaluationContext{
+				PrincipalARN: "arn:aws:iam::123456789012:user/alice",
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := evaluateArnEquals(tt.operands, tt.ctx)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("evaluateArnEquals() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("evaluateArnEquals() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEvaluateArnLike(t *testing.T) {
+	tests := []struct {
+		name     string
+		operands map[string]interface{}
+		ctx      *EvaluationContext
+		want     bool
+	}{
+		{
+			name: "Exact match",
+			operands: map[string]interface{}{
+				"aws:PrincipalArn": "arn:aws:iam::123456789012:user/alice",
+			},
+			ctx: &EvaluationContext{
+				PrincipalARN: "arn:aws:iam::123456789012:user/alice",
+			},
+			want: true,
+		},
+		{
+			name: "Wildcard prefix",
+			operands: map[string]interface{}{
+				"aws:PrincipalArn": "arn:aws:iam::*:user/alice",
+			},
+			ctx: &EvaluationContext{
+				PrincipalARN: "arn:aws:iam::123456789012:user/alice",
+			},
+			want: true,
+		},
+		{
+			name: "Wildcard suffix",
+			operands: map[string]interface{}{
+				"aws:PrincipalArn": "arn:aws:iam::123456789012:user/*",
+			},
+			ctx: &EvaluationContext{
+				PrincipalARN: "arn:aws:iam::123456789012:user/alice",
+			},
+			want: true,
+		},
+		{
+			name: "Wildcard middle",
+			operands: map[string]interface{}{
+				"aws:PrincipalArn": "arn:aws:*:user/alice",
+			},
+			ctx: &EvaluationContext{
+				PrincipalARN: "arn:aws:iam::123456789012:user/alice",
+			},
+			want: true,
+		},
+		{
+			name: "No match",
+			operands: map[string]interface{}{
+				"aws:PrincipalArn": "arn:aws:iam::*:user/bob",
+			},
+			ctx: &EvaluationContext{
+				PrincipalARN: "arn:aws:iam::123456789012:user/alice",
+			},
+			want: false,
+		},
+		{
+			name: "Full wildcard",
+			operands: map[string]interface{}{
+				"aws:PrincipalArn": "*",
+			},
+			ctx: &EvaluationContext{
+				PrincipalARN: "arn:aws:iam::123456789012:user/alice",
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, _ := evaluateArnLike(tt.operands, tt.ctx)
+			if got != tt.want {
+				t.Errorf("evaluateArnLike() = %v, want %v", got, tt.want)
 			}
 		})
 	}
