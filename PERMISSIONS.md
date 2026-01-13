@@ -141,6 +141,87 @@ To collect SCPs from AWS Organizations (using `--include-scps` flag), add these 
    - You'll see a debug message: `"No Organizations access, skipping SCPs"`
    - Regular IAM and resource policy analysis will still work
 
+## Multi-Account Collection Permissions
+
+To collect from all accounts in your organization (using `--all-accounts` flag), you need:
+
+**1. Management Account Permissions:**
+
+Run `aws-access-map collect --all-accounts` from the management account with these permissions:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "OrganizationsMultiAccountAccess",
+      "Effect": "Allow",
+      "Action": [
+        "organizations:ListAccounts",
+        "organizations:DescribeOrganization",
+        "organizations:ListPolicies",
+        "organizations:DescribePolicy",
+        "organizations:ListTargetsForPolicy",
+        "organizations:ListParents",
+        "sts:AssumeRole"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+**2. Member Account Cross-Account Role:**
+
+Each member account must have a role that the management account can assume. By default, AWS Organizations creates `OrganizationAccountAccessRole` automatically.
+
+**Default role (OrganizationAccountAccessRole):**
+- Created automatically by AWS Organizations when accounts are created/invited
+- Has Administrator Access by default
+- Can be assumed by the management account
+
+**Custom role:**
+If using a custom role name (via `--role-name` flag), ensure:
+
+1. Role exists in all member accounts with this trust policy:
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::MANAGEMENT_ACCOUNT_ID:root"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+```
+
+2. Role has the IAM Read Access permissions listed at the top of this document
+
+**Multi-Account Permission Details:**
+
+- **`organizations:ListAccounts`**: Lists all accounts in the organization
+- **`organizations:DescribeOrganization`**: Gets organization ID and metadata
+- **`sts:AssumeRole`**: Assumes cross-account role in each member account
+- **Organization-wide SCPs**: Automatically collected for all accounts
+
+**Example:**
+```bash
+# From management account with Organizations access
+aws-access-map collect --all-accounts
+
+# Use custom role name if OrganizationAccountAccessRole doesn't exist
+aws-access-map collect --all-accounts --role-name CustomAuditRole
+```
+
+**Error Handling:**
+- Failed accounts are tracked but don't stop collection
+- Output includes success/failure counts and failed account IDs
+- Common failures: missing role, insufficient permissions, suspended accounts
+
 ## Complete IAM Policy Example
 
 Here's a complete IAM policy with all permissions for full `aws-access-map` functionality:
@@ -185,19 +266,24 @@ Here's a complete IAM policy with all permissions for full `aws-access-map` func
       "Resource": "*"
     },
     {
-      "Sid": "OrganizationsSCPAccess",
+      "Sid": "OrganizationsAccess",
       "Effect": "Allow",
       "Action": [
         "organizations:ListPolicies",
         "organizations:DescribePolicy",
         "organizations:ListTargetsForPolicy",
-        "organizations:ListParents"
+        "organizations:ListParents",
+        "organizations:ListAccounts",
+        "organizations:DescribeOrganization",
+        "sts:AssumeRole"
       ],
       "Resource": "*"
     }
   ]
 }
 ```
+
+**Note:** The complete policy includes multi-account permissions (`ListAccounts`, `DescribeOrganization`, `AssumeRole`). These are only needed for `--all-accounts` flag.
 
 ## Applying the Policy
 

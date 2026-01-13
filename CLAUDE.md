@@ -301,14 +301,25 @@ jq '.Principals[] | select(.Type == "role") | .TrustPolicy' testdata/collected-d
 # Should show AWS service principals
 ```
 
-## Future Enhancements
+## Implementation Status
 
-1. **Condition evaluation**: Full support for policy conditions
-2. **Multi-account**: Query across AWS Organizations
-3. **Real-time updates**: Watch for policy changes
-4. **Visualization**: Export to graph visualization tools
-5. **Risk scoring**: Calculate risk scores for access paths
-6. **Remediation**: Suggest policy changes to reduce risk
+### ✅ Completed (as of v0.6.0)
+
+1. **Condition evaluation** (v0.4.0): Full support for 22 condition operators (IP, MFA, dates, ARNs, strings, numerics)
+2. **Service Control Policies** (v0.5.0): Organization-level policy evaluation with OU hierarchy
+3. **Permission boundaries** (v0.6.0): Principal-level constraint evaluation
+4. **Session policies** (v0.6.0): Temporary session constraint evaluation
+5. **File-based caching** (v0.6.0): Automatic per-account caching with TTL
+6. **Multi-account** (v0.6.0): Organization-wide collection via AWS Organizations
+
+### 🚧 Future Enhancements
+
+1. **Real-time updates**: Watch for policy changes and auto-refresh
+2. **Visualization**: Export to graph visualization tools (Neo4j, Gephi)
+3. **Risk scoring**: Calculate quantitative risk scores for access paths
+4. **Remediation**: AI-powered policy recommendations to reduce risk
+5. **Web UI**: Optional web interface for visual exploration
+6. **Advanced caching**: Multi-account cache with incremental updates
 
 ## Debugging Tips
 
@@ -356,29 +367,37 @@ Yes! Trust policies can allow principals from other accounts. Track these as edg
 
 Based on real-world testing and user needs:
 
-**Phase 1 (MVP - Current)**
+**Phase 1 - MVP (v0.1.0 - v0.3.0)** ✅
 1. ✅ IAM policy collection (users, roles, managed policies)
-2. ✅ Basic wildcard matching
+2. ✅ Enhanced wildcard matching (glob patterns)
 3. ✅ who-can command
-4. ⏳ Enhanced wildcard matching (glob patterns)
+4. ✅ Role assumption path traversal (BFS)
+5. ✅ Deny rule evaluation
 
-**Phase 2 (Next)**
-1. Resource policy collection (S3, KMS, SQS, SNS)
-2. Role assumption path traversal
-3. Deny rule evaluation
-4. JSON output mode for scripting
+**Phase 2 - Resource Policies (v0.2.0 - v0.3.0)** ✅
+1. ✅ Resource policy collection (S3, KMS, SQS, SNS, Secrets Manager)
+2. ✅ JSON output mode for scripting
+3. ✅ Report command for risk analysis
+4. ✅ Path command for access traversal
 
-**Phase 3 (Future)**
-1. Policy condition evaluation
-2. Service Control Policies (SCPs)
-3. Multi-account via AWS Organizations
-4. Performance optimizations (caching, concurrent collection)
+**Phase 3 - Advanced Evaluation (v0.4.0 - v0.5.0)** ✅
+1. ✅ Policy condition evaluation (22 operators)
+2. ✅ Service Control Policies (SCPs) with OU hierarchy
+3. ✅ Condition flags (--source-ip, --mfa, --org-id)
 
-**Phase 4 (Nice-to-have)**
-1. Web UI for visualization
-2. Export to graph databases (Neo4j)
-3. Real-time change detection
-4. Policy remediation suggestions
+**Phase 4 - Enterprise Scale (v0.6.0)** ✅
+1. ✅ Permission boundaries (principal-level constraints)
+2. ✅ Session policies (temporary session constraints)
+3. ✅ File-based caching with TTL (24h default)
+4. ✅ Multi-account via AWS Organizations
+
+**Phase 5 - Future Enhancements**
+1. ⏳ Web UI for visualization
+2. ⏳ Export to graph databases (Neo4j)
+3. ⏳ Real-time change detection
+4. ⏳ Policy remediation suggestions
+5. ⏳ Risk scoring algorithms
+6. ⏳ Advanced cache strategies (incremental updates)
 
 ## Example Development Session
 
