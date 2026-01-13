@@ -100,12 +100,43 @@ const (
 	PolicyTypeBoundary    PolicyType = "boundary"
 )
 
+// SCPAttachment represents a Service Control Policy and its targets
+type SCPAttachment struct {
+	Policy  PolicyDocument
+	Targets []SCPTarget
+}
+
+// SCPTarget represents a target (account, OU, or root) where an SCP is attached
+type SCPTarget struct {
+	Type       SCPTargetType
+	ID         string // Account ID, OU ID, or "ROOT"
+	ARN        string `json:"Arn,omitempty"`
+	Name       string `json:"Name,omitempty"`
+}
+
+// SCPTargetType represents the type of SCP target
+type SCPTargetType string
+
+const (
+	SCPTargetTypeAccount        SCPTargetType = "ACCOUNT"
+	SCPTargetTypeOrganizationalUnit SCPTargetType = "ORGANIZATIONAL_UNIT"
+	SCPTargetTypeRoot           SCPTargetType = "ROOT"
+)
+
+// OUHierarchy represents the organizational unit hierarchy for an account
+type OUHierarchy struct {
+	AccountID string
+	ParentOUs []string // List of OU IDs from immediate parent to root
+}
+
 // CollectionResult holds all collected AWS data
 type CollectionResult struct {
-	Principals  []*Principal
-	Resources   []*Resource
-	SCPs        []PolicyDocument
-	CollectedAt time.Time
-	AccountID   string
-	Regions     []string
+	Principals      []*Principal
+	Resources       []*Resource
+	SCPs            []PolicyDocument    // Deprecated: Use SCPAttachments for hierarchy-aware filtering
+	SCPAttachments  []SCPAttachment     // SCPs with target information
+	OUHierarchy     *OUHierarchy        // OU membership for the account
+	CollectedAt     time.Time
+	AccountID       string
+	Regions         []string
 }

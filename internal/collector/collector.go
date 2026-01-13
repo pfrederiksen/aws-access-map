@@ -133,11 +133,30 @@ func (c *Collector) Collect(ctx context.Context) (*types.CollectionResult, error
 
 	// Collect Service Control Policies (if enabled)
 	if c.includeSCPs {
-		scps, err := c.collectSCPs(ctx)
+		// Collect SCPs with target information (for hierarchy-aware filtering)
+		scpAttachments, err := c.collectSCPsWithTargets(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("failed to collect SCPs: %w", err)
 		}
+		result.SCPAttachments = scpAttachments
+
+		// Also populate legacy SCPs field for backward compatibility
+		scps := make([]types.PolicyDocument, len(scpAttachments))
+		for i, attachment := range scpAttachments {
+			scps[i] = attachment.Policy
+		}
 		result.SCPs = scps
+
+		// Get OU hierarchy for this account (for SCP filtering)
+		ouHierarchy, err := c.getOUHierarchy(ctx, accountID)
+		if err != nil {
+			// Log warning but don't fail - we'll fall back to conservative filtering
+			if c.debug {
+				fmt.Printf("DEBUG: Failed to get OU hierarchy for account %s: %v\n", accountID, err)
+			}
+		} else {
+			result.OUHierarchy = ouHierarchy
+		}
 	}
 
 	// TODO: Collect groups, permission boundaries, etc.
@@ -422,6 +441,157 @@ func (c *Collector) collectSCPs(ctx context.Context) ([]types.PolicyDocument, er
 	}
 
 	return scps, nil
+}
+
+// collectSCPsWithTargets fetches Service Control Policies with target information
+func (c *Collector) collectSCPsWithTargets(ctx context.Context) ([]types.SCPAttachment, error) {
+	if !c.includeSCPs {
+		return nil, nil // Skip if not enabled
+	}
+
+	var attachments []types.SCPAttachment
+
+	// List all SCPs in the organization
+	paginator := organizations.NewListPoliciesPaginator(c.organizationsClient, &organizations.ListPoliciesInput{
+		Filter: organizationstypes.PolicyTypeServiceControlPolicy,
+	})
+
+	for paginator.HasMorePages() {
+		output, err := paginator.NextPage(ctx)
+		if err != nil {
+			// Handle permission errors gracefully (not all accounts have Org access)
+			if isAccessDeniedError(err) {
+				if c.debug {
+					fmt.Printf("DEBUG: No Organizations access, skipping SCPs: %v\n", err)
+				}
+				return nil, nil // Return empty, not an error
+			}
+			return nil, fmt.Errorf("failed to list SCPs: %w", err)
+		}
+
+		// For each SCP, get its policy document and targets
+		for _, policySummary := range output.Policies {
+			policyDetail, err := c.organizationsClient.DescribePolicy(ctx, &organizations.DescribePolicyInput{
+				PolicyId: policySummary.Id,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("failed to describe SCP %s: %w", *policySummary.Name, err)
+			}
+
+			// Parse the policy document
+			policyDoc, err := c.parsePolicy(*policyDetail.Policy.Content)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse SCP %s: %w", *policySummary.Name, err)
+			}
+
+			// Store SCP metadata (ID) in policy
+			policyDoc.ID = *policySummary.Id
+
+			// Get targets where this SCP is attached
+			targets, err := c.getSCPTargets(ctx, *policySummary.Id)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get targets for SCP %s: %w", *policySummary.Name, err)
+			}
+
+			if c.debug {
+				fmt.Printf("DEBUG: Collected SCP: %s (ID: %s) with %d targets\n", *policySummary.Name, *policySummary.Id, len(targets))
+			}
+
+			attachments = append(attachments, types.SCPAttachment{
+				Policy:  *policyDoc,
+				Targets: targets,
+			})
+		}
+	}
+
+	return attachments, nil
+}
+
+// getSCPTargets fetches all targets (accounts, OUs, root) where an SCP is attached
+func (c *Collector) getSCPTargets(ctx context.Context, policyID string) ([]types.SCPTarget, error) {
+	var targets []types.SCPTarget
+
+	// List all targets for this policy
+	paginator := organizations.NewListTargetsForPolicyPaginator(c.organizationsClient, &organizations.ListTargetsForPolicyInput{
+		PolicyId: &policyID,
+	})
+
+	for paginator.HasMorePages() {
+		output, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list targets for policy %s: %w", policyID, err)
+		}
+
+		for _, target := range output.Targets {
+			scpTarget := types.SCPTarget{
+				Type: types.SCPTargetType(target.Type),
+				ID:   *target.TargetId,
+			}
+
+			// Add ARN and Name if available
+			if target.Arn != nil {
+				scpTarget.ARN = *target.Arn
+			}
+			if target.Name != nil {
+				scpTarget.Name = *target.Name
+			}
+
+			targets = append(targets, scpTarget)
+		}
+	}
+
+	return targets, nil
+}
+
+// getOUHierarchy retrieves the organizational unit hierarchy for an account
+// Returns a list of OU IDs from the immediate parent to the root
+func (c *Collector) getOUHierarchy(ctx context.Context, accountID string) (*types.OUHierarchy, error) {
+	hierarchy := &types.OUHierarchy{
+		AccountID: accountID,
+		ParentOUs: []string{},
+	}
+
+	// Start with the account and traverse up to root
+	currentID := accountID
+
+	for {
+		// Get parents of current entity
+		output, err := c.organizationsClient.ListParents(ctx, &organizations.ListParentsInput{
+			ChildId: &currentID,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to list parents for %s: %w", currentID, err)
+		}
+
+		// Should have exactly one parent (accounts can only be in one place)
+		if len(output.Parents) == 0 {
+			// Reached the top (no more parents)
+			break
+		}
+
+		parent := output.Parents[0]
+
+		// If parent is ROOT, we're done
+		if parent.Type == organizationstypes.ParentTypeRoot {
+			break
+		}
+
+		// If parent is an OU, add it to the hierarchy and continue up
+		if parent.Type == organizationstypes.ParentTypeOrganizationalUnit {
+			hierarchy.ParentOUs = append(hierarchy.ParentOUs, *parent.Id)
+			currentID = *parent.Id
+			continue
+		}
+
+		// Unknown parent type, stop here
+		break
+	}
+
+	if c.debug && len(hierarchy.ParentOUs) > 0 {
+		fmt.Printf("DEBUG: Account %s is in OU hierarchy: %v\n", accountID, hierarchy.ParentOUs)
+	}
+
+	return hierarchy, nil
 }
 
 // isAccessDeniedError checks if error is an access denied error from Organizations

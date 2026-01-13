@@ -55,7 +55,13 @@ func Build(collection *types.CollectionResult) (*Graph, error) {
 	g := New()
 
 	// Store SCPs (evaluated at query time, not preprocessed into edges)
-	g.scps = collection.SCPs
+	// If SCPAttachments are available, filter SCPs for this account
+	if len(collection.SCPAttachments) > 0 {
+		g.scps = filterSCPsForAccount(collection.AccountID, collection.SCPAttachments, collection.OUHierarchy)
+	} else {
+		// Fall back to legacy SCPs field (no filtering)
+		g.scps = collection.SCPs
+	}
 
 	// Add all principals
 	for _, principal := range collection.Principals {
@@ -496,5 +502,78 @@ func (g *Graph) isBlockedBySCP(principalARN, action, resourceARN string, ctx *co
 // isRootUser checks if the ARN represents the root user
 // Root user ARN format: arn:aws:iam::123456789012:root
 func isRootUser(arn string) bool {
-	return len(arn) > 0 && (arn[len(arn)-5:] == ":root" || arn[len(arn)-6:] == ":root/")
+	if len(arn) < 5 {
+		return false
+	}
+	// Check for ":root" suffix (minimum 5 chars)
+	if len(arn) >= 5 && arn[len(arn)-5:] == ":root" {
+		return true
+	}
+	// Check for ":root/" suffix (minimum 6 chars)
+	if len(arn) >= 6 && arn[len(arn)-6:] == ":root/" {
+		return true
+	}
+	return false
+}
+
+// filterSCPsForAccount filters SCPs to only those that apply to the given account
+// SCPs can be attached to:
+// 1. The account directly (ACCOUNT target)
+// 2. The root of the organization (ROOT target) - applies to all accounts
+// 3. An OU containing the account (ORGANIZATIONAL_UNIT target)
+//
+// This implementation uses the OU hierarchy (if available) to accurately determine
+// which SCPs apply. If OU hierarchy is not available, it conservatively includes
+// all OU-attached SCPs to avoid missing denies.
+func filterSCPsForAccount(accountID string, attachments []types.SCPAttachment, ouHierarchy *types.OUHierarchy) []types.PolicyDocument {
+	var filteredSCPs []types.PolicyDocument
+
+	// Build set of parent OUs for fast lookup
+	parentOUs := make(map[string]bool)
+	if ouHierarchy != nil {
+		for _, ouID := range ouHierarchy.ParentOUs {
+			parentOUs[ouID] = true
+		}
+	}
+
+	for _, attachment := range attachments {
+		appliesToAccount := false
+
+		for _, target := range attachment.Targets {
+			switch target.Type {
+			case types.SCPTargetTypeRoot:
+				// SCPs attached to root apply to all accounts
+				appliesToAccount = true
+
+			case types.SCPTargetTypeAccount:
+				// Check if this SCP is attached directly to our account
+				if target.ID == accountID {
+					appliesToAccount = true
+				}
+
+			case types.SCPTargetTypeOrganizationalUnit:
+				if ouHierarchy != nil {
+					// Check if this OU is in our hierarchy (we're a member of it)
+					if parentOUs[target.ID] {
+						appliesToAccount = true
+					}
+				} else {
+					// No OU hierarchy available - conservatively include all OU-attached SCPs
+					// This may result in false positives (reporting denies that don't apply)
+					// but is safer than false negatives (missing denies that do apply)
+					appliesToAccount = true
+				}
+			}
+
+			if appliesToAccount {
+				break
+			}
+		}
+
+		if appliesToAccount {
+			filteredSCPs = append(filteredSCPs, attachment.Policy)
+		}
+	}
+
+	return filteredSCPs
 }
