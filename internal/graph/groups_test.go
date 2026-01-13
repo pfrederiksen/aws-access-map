@@ -40,7 +40,9 @@ func TestCanAccess_UserViaGroup(t *testing.T) {
 
 	g.AddPrincipal(group)
 	for _, policy := range group.Policies {
-		g.addPolicyEdges(group.ARN, policy)
+		if err := g.addPolicyEdges(group.ARN, policy); err != nil {
+			t.Fatalf("Failed to add policy edges for group: %v", err)
+		}
 	}
 
 	g.AddPrincipal(user)
@@ -108,12 +110,16 @@ func TestCanAccess_UserInMultipleGroups(t *testing.T) {
 
 	g.AddPrincipal(group1)
 	for _, policy := range group1.Policies {
-		g.addPolicyEdges(group1.ARN, policy)
+		if err := g.addPolicyEdges(group1.ARN, policy); err != nil {
+			t.Fatalf("Failed to add policy edges for group1: %v", err)
+		}
 	}
 
 	g.AddPrincipal(group2)
 	for _, policy := range group2.Policies {
-		g.addPolicyEdges(group2.ARN, policy)
+		if err := g.addPolicyEdges(group2.ARN, policy); err != nil {
+			t.Fatalf("Failed to add policy edges for group2: %v", err)
+		}
 	}
 
 	g.AddPrincipal(user)
@@ -176,12 +182,16 @@ func TestCanAccess_GroupDenyOverridesUserAllow(t *testing.T) {
 
 	g.AddPrincipal(group)
 	for _, policy := range group.Policies {
-		g.addPolicyEdges(group.ARN, policy)
+		if err := g.addPolicyEdges(group.ARN, policy); err != nil {
+			t.Fatalf("Failed to add policy edges for group: %v", err)
+		}
 	}
 
 	g.AddPrincipal(user)
 	for _, policy := range user.Policies {
-		g.addPolicyEdges(user.ARN, policy)
+		if err := g.addPolicyEdges(user.ARN, policy); err != nil {
+			t.Fatalf("Failed to add policy edges for user: %v", err)
+		}
 	}
 
 	// User should be able to GetObject (group doesn't deny it)
@@ -223,7 +233,9 @@ func TestCanAccess_UserNoGroups(t *testing.T) {
 
 	g.AddPrincipal(user)
 	for _, policy := range user.Policies {
-		g.addPolicyEdges(user.ARN, policy)
+		if err := g.addPolicyEdges(user.ARN, policy); err != nil {
+			t.Fatalf("Failed to add policy edges for user: %v", err)
+		}
 	}
 
 	// User should have access through direct policy
@@ -267,7 +279,9 @@ func TestCanAccess_GroupWildcardMatching(t *testing.T) {
 
 	g.AddPrincipal(group)
 	for _, policy := range group.Policies {
-		g.addPolicyEdges(group.ARN, policy)
+		if err := g.addPolicyEdges(group.ARN, policy); err != nil {
+			t.Fatalf("Failed to add policy edges for group: %v", err)
+		}
 	}
 
 	g.AddPrincipal(user)
@@ -317,7 +331,9 @@ func TestCanAccess_EmptyGroupMemberships(t *testing.T) {
 
 	g.AddPrincipal(user)
 	for _, policy := range user.Policies {
-		g.addPolicyEdges(user.ARN, policy)
+		if err := g.addPolicyEdges(user.ARN, policy); err != nil {
+			t.Fatalf("Failed to add policy edges for user: %v", err)
+		}
 	}
 
 	// User should still have access through direct policy
@@ -353,7 +369,9 @@ func TestCanAccess_NonExistentGroupMembership(t *testing.T) {
 
 	g.AddPrincipal(user)
 	for _, policy := range user.Policies {
-		g.addPolicyEdges(user.ARN, policy)
+		if err := g.addPolicyEdges(user.ARN, policy); err != nil {
+			t.Fatalf("Failed to add policy edges for user: %v", err)
+		}
 	}
 
 	// User should still have access through direct policy (non-existent group is ignored)
