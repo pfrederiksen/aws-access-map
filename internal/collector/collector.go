@@ -182,8 +182,7 @@ func (c *Collector) getAccountID(ctx context.Context) (string, error) {
 	// Extract account ID from ARN
 	if output.User != nil && output.User.Arn != nil {
 		// ARN format: arn:aws:iam::123456789012:user/username
-		// Parse account ID from ARN (simplified)
-		return "123456789012", nil // TODO: Parse properly
+		return extractAccountIDFromARN(*output.User.Arn), nil
 	}
 
 	return "", fmt.Errorf("unable to determine account ID")
