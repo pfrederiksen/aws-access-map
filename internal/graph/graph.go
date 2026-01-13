@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/pfrederiksen/aws-access-map/internal/policy"
+	"github.com/pfrederiksen/aws-access-map/internal/policy/conditions"
 	"github.com/pfrederiksen/aws-access-map/pkg/types"
 )
 
@@ -176,10 +177,18 @@ func (g *Graph) GetAllResources() []*types.Resource {
 }
 
 // CanAccess checks if a principal can perform an action on a resource
-// TODO: In Milestone 2, add condition evaluation
-func (g *Graph) CanAccess(principalARN, action, resourceARN string) bool {
+// Optional context parameter for condition evaluation (backward compatible)
+func (g *Graph) CanAccess(principalARN, action, resourceARN string, ctx ...*conditions.EvaluationContext) bool {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
+
+	// Use default context if not provided (permissive behavior)
+	var evalCtx *conditions.EvaluationContext
+	if len(ctx) > 0 {
+		evalCtx = ctx[0]
+	} else {
+		evalCtx = conditions.NewDefaultContext()
+	}
 
 	// Check for explicit deny first (deny always wins)
 	// Need to check all action patterns, not just exact match
@@ -189,9 +198,17 @@ func (g *Graph) CanAccess(principalARN, action, resourceARN string) bool {
 			if policy.MatchesAction(actionPattern, action) {
 				for _, edge := range denyEdges {
 					if matchesPattern(edge.ResourceARN, resourceARN) {
-						// TODO: Evaluate edge.Conditions here (Milestone 2)
-						// For now, deny if pattern matches (MVP behavior)
-						return false
+						// Evaluate conditions
+						matched, err := conditions.Evaluate(edge.Conditions, evalCtx)
+						if err != nil {
+							// If condition evaluation fails, log but continue
+							// This is permissive behavior (fail open)
+							continue
+						}
+						if matched {
+							// Deny condition matched - explicit deny wins
+							return false
+						}
 					}
 				}
 			}
@@ -205,9 +222,17 @@ func (g *Graph) CanAccess(principalARN, action, resourceARN string) bool {
 			if policy.MatchesAction(actionPattern, action) {
 				for _, edge := range allowEdges {
 					if matchesPattern(edge.ResourceARN, resourceARN) {
-						// TODO: Evaluate edge.Conditions here (Milestone 2)
-						// For now, allow if pattern matches (MVP behavior)
-						return true
+						// Evaluate conditions
+						matched, err := conditions.Evaluate(edge.Conditions, evalCtx)
+						if err != nil {
+							// If condition evaluation fails, log but continue
+							// This is permissive behavior (fail open)
+							continue
+						}
+						if matched {
+							// Allow condition matched
+							return true
+						}
 					}
 				}
 			}
