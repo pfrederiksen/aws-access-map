@@ -1180,3 +1180,123 @@ func TestEvaluateArnLike(t *testing.T) {
 		})
 	}
 }
+
+// Edge Case Tests for PR Review Issues
+
+// TestStringNotEquals_MissingContext verifies that StringNotEquals fails when context value is missing
+func TestStringNotEquals_MissingContext(t *testing.T) {
+	operands := map[string]interface{}{
+		"aws:PrincipalOrgID": "o-blocked-org",
+	}
+	ctx := &EvaluationContext{} // No PrincipalOrgID set
+
+	got, err := evaluateStringNotEquals(operands, ctx)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if got {
+		t.Error("StringNotEquals should fail when context value is missing, got true")
+	}
+}
+
+// TestNumericNotEquals_MissingContext verifies that NumericNotEquals fails when context value is missing
+func TestNumericNotEquals_MissingContext(t *testing.T) {
+	operands := map[string]interface{}{
+		"s3:max-keys": 100,
+	}
+	ctx := &EvaluationContext{
+		NumericContext: map[string]float64{}, // Empty - key not present
+	}
+
+	got, err := evaluateNumericNotEquals(operands, ctx)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if got {
+		t.Error("NumericNotEquals should fail when context value is missing, got true")
+	}
+}
+
+// TestDateNotEquals_MissingContext verifies that DateNotEquals fails when context value is missing
+func TestDateNotEquals_MissingContext(t *testing.T) {
+	operands := map[string]interface{}{
+		"aws:CurrentTime": "2026-01-15T12:00:00Z",
+	}
+	ctx := &EvaluationContext{
+		DateContext: map[string]time.Time{}, // Empty - aws:CurrentTime not set explicitly
+	}
+
+	got, err := evaluateDateNotEquals(operands, ctx)
+	if err == nil {
+		t.Error("DateNotEquals should return error when context value is missing")
+	}
+	if got {
+		t.Error("DateNotEquals should fail when context value is missing, got true")
+	}
+}
+
+// TestArnNotEquals_MissingContext verifies that ArnNotEquals fails when context value is missing
+func TestArnNotEquals_MissingContext(t *testing.T) {
+	operands := map[string]interface{}{
+		"aws:PrincipalArn": "arn:aws:iam::123456789012:user/blocked-user",
+	}
+	ctx := &EvaluationContext{} // No PrincipalARN set
+
+	got, err := evaluateArnNotEquals(operands, ctx)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if got {
+		t.Error("ArnNotEquals should fail when context value is missing, got true")
+	}
+}
+
+// TestArnNotLike_MissingContext verifies that ArnNotLike fails when context value is missing
+func TestArnNotLike_MissingContext(t *testing.T) {
+	operands := map[string]interface{}{
+		"aws:PrincipalArn": "arn:aws:iam::123456789012:user/*",
+	}
+	ctx := &EvaluationContext{} // No PrincipalARN set
+
+	got, err := evaluateArnNotLike(operands, ctx)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if got {
+		t.Error("ArnNotLike should fail when context value is missing, got true")
+	}
+}
+
+// TestBool_UnknownKey verifies that Bool evaluation fails for unknown context keys
+func TestBool_UnknownKey(t *testing.T) {
+	operands := map[string]interface{}{
+		"aws:SomeUnknownKey": false,
+	}
+	ctx := &EvaluationContext{} // Unknown key
+
+	got, err := evaluateBool(operands, ctx)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if got {
+		t.Error("Bool should fail for unknown context key, got true")
+	}
+}
+
+// TestBool_KnownKeyMatchingFalse verifies correct behavior for known keys with false value
+func TestBool_KnownKeyMatchingFalse(t *testing.T) {
+	operands := map[string]interface{}{
+		"aws:MultiFactorAuthPresent": false,
+	}
+	ctx := &EvaluationContext{
+		MFAAuthenticated: false, // Known key with false value
+	}
+
+	got, err := evaluateBool(operands, ctx)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if !got {
+		t.Error("Bool should pass when known key matches false value, got false")
+	}
+}

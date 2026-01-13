@@ -102,8 +102,7 @@ func evaluateOperator(operator string, operands map[string]interface{}, ctx *Eva
 	case "NumericEquals":
 		return evaluateNumericEquals(operands, ctx)
 	case "NumericNotEquals":
-		result, err := evaluateNumericEquals(operands, ctx)
-		return !result, err
+		return evaluateNumericNotEquals(operands, ctx)
 	case "NumericLessThan":
 		return evaluateNumericLessThan(operands, ctx)
 	case "NumericLessThanEquals":
@@ -117,8 +116,7 @@ func evaluateOperator(operator string, operands map[string]interface{}, ctx *Eva
 	case "DateEquals":
 		return evaluateDateEquals(operands, ctx)
 	case "DateNotEquals":
-		result, err := evaluateDateEquals(operands, ctx)
-		return !result, err
+		return evaluateDateNotEquals(operands, ctx)
 	case "DateLessThan":
 		return evaluateDateLessThan(operands, ctx)
 	case "DateLessThanEquals":
@@ -132,13 +130,11 @@ func evaluateOperator(operator string, operands map[string]interface{}, ctx *Eva
 	case "ArnEquals":
 		return evaluateArnEquals(operands, ctx)
 	case "ArnNotEquals":
-		result, err := evaluateArnEquals(operands, ctx)
-		return !result, err
+		return evaluateArnNotEquals(operands, ctx)
 	case "ArnLike":
 		return evaluateArnLike(operands, ctx)
 	case "ArnNotLike":
-		result, err := evaluateArnLike(operands, ctx)
-		return !result, err
+		return evaluateArnNotLike(operands, ctx)
 
 	default:
 		return false, fmt.Errorf("unsupported condition operator: %s", operator)
@@ -171,8 +167,26 @@ func evaluateStringEquals(operands map[string]interface{}, ctx *EvaluationContex
 
 // evaluateStringNotEquals checks if string values don't match
 func evaluateStringNotEquals(operands map[string]interface{}, ctx *EvaluationContext) (bool, error) {
-	result, err := evaluateStringEquals(operands, ctx)
-	return !result, err
+	for key, expectedValue := range operands {
+		actualValue := getContextValue(key, ctx)
+		if actualValue == "" {
+			// Key not found in context - condition fails (same as positive operators)
+			return false, nil
+		}
+
+		// Convert expected value to string
+		expectedStr, ok := expectedValue.(string)
+		if !ok {
+			return false, fmt.Errorf("expected string value for StringNotEquals, got %T", expectedValue)
+		}
+
+		// Case-sensitive comparison - all values must NOT equal
+		if actualValue == expectedStr {
+			return false, nil
+		}
+	}
+
+	return true, nil
 }
 
 // evaluateStringLike checks if string matches a pattern (supports * wildcard)
@@ -200,7 +214,11 @@ func evaluateStringLike(operands map[string]interface{}, ctx *EvaluationContext)
 // evaluateBool checks boolean conditions
 func evaluateBool(operands map[string]interface{}, ctx *EvaluationContext) (bool, error) {
 	for key, expectedValue := range operands {
-		actualValue := getBoolContextValue(key, ctx)
+		actualValue, found := getBoolContextValue(key, ctx)
+		if !found {
+			// Key not found in context - condition fails
+			return false, nil
+		}
 
 		// Handle expected value as string "true"/"false" or bool
 		var expectedBool bool
@@ -309,14 +327,15 @@ func getContextValue(key string, ctx *EvaluationContext) string {
 }
 
 // getBoolContextValue retrieves a boolean value from context by key
-func getBoolContextValue(key string, ctx *EvaluationContext) bool {
+// Returns (value, found) where found indicates if the key exists
+func getBoolContextValue(key string, ctx *EvaluationContext) (bool, bool) {
 	switch key {
 	case "aws:MultiFactorAuthPresent":
-		return ctx.MFAAuthenticated
+		return ctx.MFAAuthenticated, true
 	case "aws:SecureTransport":
-		return ctx.SecureTransport
+		return ctx.SecureTransport, true
 	default:
-		return false
+		return false, false // Key not found
 	}
 }
 
@@ -373,6 +392,30 @@ func evaluateNumericEquals(operands map[string]interface{}, ctx *EvaluationConte
 		}
 
 		if actualValue != expectedNum {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
+// evaluateNumericNotEquals checks if numeric values are not equal
+func evaluateNumericNotEquals(operands map[string]interface{}, ctx *EvaluationContext) (bool, error) {
+	for key, expectedValue := range operands {
+		actualValue, ok := ctx.NumericContext[key]
+		if !ok {
+			// Key not found in context - condition fails (same as positive operators)
+			return false, nil
+		}
+
+		// Convert expected value to float64
+		expectedNum, err := toFloat64(expectedValue)
+		if err != nil {
+			return false, fmt.Errorf("expected numeric value for NumericNotEquals, got %T: %w", expectedValue, err)
+		}
+
+		// All values must NOT equal
+		if actualValue == expectedNum {
 			return false, nil
 		}
 	}
@@ -505,6 +548,29 @@ func evaluateDateEquals(operands map[string]interface{}, ctx *EvaluationContext)
 
 		// Compare times (equal means same instant, ignoring location)
 		if !actualTime.Equal(expectedTime) {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
+// evaluateDateNotEquals checks if date values are not equal
+func evaluateDateNotEquals(operands map[string]interface{}, ctx *EvaluationContext) (bool, error) {
+	for key, expectedValue := range operands {
+		actualTime, err := getDateContextValue(key, ctx)
+		if err != nil {
+			// Key not found or invalid - condition fails (same as positive operators)
+			return false, err
+		}
+
+		expectedTime, err := parseTime(expectedValue)
+		if err != nil {
+			return false, fmt.Errorf("expected date value for DateNotEquals, got %T: %w", expectedValue, err)
+		}
+
+		// All values must NOT equal
+		if actualTime.Equal(expectedTime) {
 			return false, nil
 		}
 	}
@@ -689,6 +755,53 @@ func evaluateArnLike(operands map[string]interface{}, ctx *EvaluationContext) (b
 
 		// Use wildcard matching for ARN patterns
 		if !wildcardMatch(expectedPattern, actualARN) {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
+// evaluateArnNotEquals checks if ARN values are not equal
+func evaluateArnNotEquals(operands map[string]interface{}, ctx *EvaluationContext) (bool, error) {
+	for key, expectedValue := range operands {
+		actualARN := getARNContextValue(key, ctx)
+		if actualARN == "" {
+			// Key not found in context - condition fails (same as positive operators)
+			return false, nil
+		}
+
+		// Convert expected value to string
+		expectedARN, ok := expectedValue.(string)
+		if !ok {
+			return false, fmt.Errorf("expected string ARN for ArnNotEquals, got %T", expectedValue)
+		}
+
+		// All values must NOT equal
+		if actualARN == expectedARN {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
+// evaluateArnNotLike checks if ARN does not match a pattern
+func evaluateArnNotLike(operands map[string]interface{}, ctx *EvaluationContext) (bool, error) {
+	for key, expectedValue := range operands {
+		actualARN := getARNContextValue(key, ctx)
+		if actualARN == "" {
+			// Key not found in context - condition fails (same as positive operators)
+			return false, nil
+		}
+
+		expectedPattern, ok := expectedValue.(string)
+		if !ok {
+			return false, fmt.Errorf("expected string pattern for ArnNotLike, got %T", expectedValue)
+		}
+
+		// All values must NOT match the pattern
+		if wildcardMatch(expectedPattern, actualARN) {
 			return false, nil
 		}
 	}

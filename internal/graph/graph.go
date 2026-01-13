@@ -2,6 +2,7 @@ package graph
 
 import (
 	"fmt"
+	"log"
 	"sync"
 
 	"github.com/pfrederiksen/aws-access-map/internal/policy"
@@ -201,9 +202,11 @@ func (g *Graph) CanAccess(principalARN, action, resourceARN string, ctx ...*cond
 						// Evaluate conditions
 						matched, err := conditions.Evaluate(edge.Conditions, evalCtx)
 						if err != nil {
-							// If condition evaluation fails, log but continue
-							// This is permissive behavior (fail open)
-							continue
+							// For deny rules, fail closed (conservative) - if we can't
+							// evaluate the condition, assume the deny applies for safety
+							log.Printf("Warning: Failed to evaluate deny condition for %s on %s: %v (assuming deny applies)",
+								principalARN, resourceARN, err)
+							return false
 						}
 						if matched {
 							// Deny condition matched - explicit deny wins
@@ -225,8 +228,10 @@ func (g *Graph) CanAccess(principalARN, action, resourceARN string, ctx ...*cond
 						// Evaluate conditions
 						matched, err := conditions.Evaluate(edge.Conditions, evalCtx)
 						if err != nil {
-							// If condition evaluation fails, log but continue
-							// This is permissive behavior (fail open)
+							// For allow rules, skip this edge if condition can't be evaluated
+							// (this particular allow doesn't apply, but others might)
+							log.Printf("Warning: Failed to evaluate allow condition for %s on %s: %v (skipping this allow)",
+								principalARN, resourceARN, err)
 							continue
 						}
 						if matched {
