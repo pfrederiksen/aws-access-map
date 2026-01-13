@@ -98,18 +98,22 @@ func versionCmd() *cobra.Command {
 }
 
 func collectCmd() *cobra.Command {
-	var outputFile string
+	var (
+		outputFile  string
+		includeSCPs bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "collect",
 		Short: "Collect IAM and resource policy data from AWS",
 		Long:  `Fetches IAM policies, resource policies, SCPs, and role trust policies from your AWS account.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCollect(outputFile)
+			return runCollect(outputFile, includeSCPs)
 		},
 	}
 
 	cmd.Flags().StringVarP(&outputFile, "output", "o", "aws-access-data.json", "Output file for collected data")
+	cmd.Flags().BoolVar(&includeSCPs, "include-scps", false, "Collect Service Control Policies from AWS Organizations (requires organizations:ListPolicies permission)")
 
 	return cmd
 }
@@ -200,7 +204,7 @@ Use 'who-can "*" --action "*"' to find admin users manually for now.`,
 	return cmd
 }
 
-func runCollect(outputFile string) error {
+func runCollect(outputFile string, includeSCPs bool) error {
 	// Validate format
 	if format != "text" && format != "json" {
 		return fmt.Errorf("invalid format: %s (must be 'text' or 'json')", format)
@@ -217,7 +221,7 @@ func runCollect(outputFile string) error {
 	fmt.Fprintln(logOutput, "Collecting AWS IAM data...")
 
 	// Create collector
-	col, err := collector.New(ctx, region, profile, debug)
+	col, err := collector.New(ctx, region, profile, debug, includeSCPs)
 	if err != nil {
 		return fmt.Errorf("failed to create collector: %w", err)
 	}
@@ -264,7 +268,7 @@ func runWhoCan(resource, action string) error {
 
 	// For MVP, collect data on the fly
 	// TODO: Load from cached file
-	col, err := collector.New(ctx, region, profile, debug)
+	col, err := collector.New(ctx, region, profile, debug, false) // Don't collect SCPs for query commands
 	if err != nil {
 		return fmt.Errorf("failed to create collector: %w", err)
 	}
@@ -310,7 +314,7 @@ func runPath(from, to, action string) error {
 	}
 
 	// Collect data
-	col, err := collector.New(ctx, region, profile, debug)
+	col, err := collector.New(ctx, region, profile, debug, false) // Don't collect SCPs for query commands
 	if err != nil {
 		return fmt.Errorf("failed to create collector: %w", err)
 	}
@@ -355,7 +359,7 @@ func runReport(account string, highRisk bool) error {
 		logOutput = os.Stderr
 	}
 
-	col, err := collector.New(ctx, region, profile, debug)
+	col, err := collector.New(ctx, region, profile, debug, false) // Don't collect SCPs for query commands
 	if err != nil {
 		return fmt.Errorf("failed to create collector: %w", err)
 	}

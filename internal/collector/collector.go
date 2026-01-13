@@ -2,12 +2,15 @@ package collector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/aws/aws-sdk-go-v2/service/kms"
+	"github.com/aws/aws-sdk-go-v2/service/organizations"
+	organizationstypes "github.com/aws/aws-sdk-go-v2/service/organizations/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/aws/aws-sdk-go-v2/service/sns"
@@ -24,13 +27,15 @@ type Collector struct {
 	sqsClient            *sqs.Client
 	snsClient            *sns.Client
 	secretsManagerClient *secretsmanager.Client
+	organizationsClient  *organizations.Client
 	region               string
 	profile              string
 	debug                bool
+	includeSCPs          bool
 }
 
 // New creates a new Collector instance
-func New(ctx context.Context, region, profile string, debug bool) (*Collector, error) {
+func New(ctx context.Context, region, profile string, debug bool, includeSCPs bool) (*Collector, error) {
 	var opts []func(*config.LoadOptions) error
 
 	if profile != "" {
@@ -55,9 +60,11 @@ func New(ctx context.Context, region, profile string, debug bool) (*Collector, e
 		sqsClient:            sqs.NewFromConfig(cfg),
 		snsClient:            sns.NewFromConfig(cfg),
 		secretsManagerClient: secretsmanager.NewFromConfig(cfg),
+		organizationsClient:  organizations.NewFromConfig(cfg),
 		region:               region,
 		profile:              profile,
 		debug:                debug,
+		includeSCPs:          includeSCPs,
 	}, nil
 }
 
@@ -124,7 +131,16 @@ func (c *Collector) Collect(ctx context.Context) (*types.CollectionResult, error
 	}
 	result.Resources = append(result.Resources, secretsResources...)
 
-	// TODO: Collect groups, SCPs, etc.
+	// Collect Service Control Policies (if enabled)
+	if c.includeSCPs {
+		scps, err := c.collectSCPs(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to collect SCPs: %w", err)
+		}
+		result.SCPs = scps
+	}
+
+	// TODO: Collect groups, permission boundaries, etc.
 
 	return result, nil
 }
@@ -351,4 +367,68 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// collectSCPs fetches Service Control Policies from AWS Organizations
+func (c *Collector) collectSCPs(ctx context.Context) ([]types.PolicyDocument, error) {
+	if !c.includeSCPs {
+		return nil, nil // Skip if not enabled
+	}
+
+	var scps []types.PolicyDocument
+
+	// List all SCPs in the organization
+	paginator := organizations.NewListPoliciesPaginator(c.organizationsClient, &organizations.ListPoliciesInput{
+		Filter: organizationstypes.PolicyTypeServiceControlPolicy,
+	})
+
+	for paginator.HasMorePages() {
+		output, err := paginator.NextPage(ctx)
+		if err != nil {
+			// Handle permission errors gracefully (not all accounts have Org access)
+			if isAccessDeniedError(err) {
+				if c.debug {
+					fmt.Printf("DEBUG: No Organizations access, skipping SCPs: %v\n", err)
+				}
+				return nil, nil // Return empty, not an error
+			}
+			return nil, fmt.Errorf("failed to list SCPs: %w", err)
+		}
+
+		// For each SCP, get its policy document
+		for _, policySummary := range output.Policies {
+			policyDetail, err := c.organizationsClient.DescribePolicy(ctx, &organizations.DescribePolicyInput{
+				PolicyId: policySummary.Id,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("failed to describe SCP %s: %w", *policySummary.Name, err)
+			}
+
+			// Parse the policy document
+			policyDoc, err := c.parsePolicy(*policyDetail.Policy.Content)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse SCP %s: %w", *policySummary.Name, err)
+			}
+
+			// Store SCP metadata (ID) in policy
+			policyDoc.ID = *policySummary.Id
+
+			if c.debug {
+				fmt.Printf("DEBUG: Collected SCP: %s (ID: %s)\n", *policySummary.Name, *policySummary.Id)
+			}
+
+			scps = append(scps, *policyDoc)
+		}
+	}
+
+	return scps, nil
+}
+
+// isAccessDeniedError checks if error is an access denied error from Organizations
+func isAccessDeniedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var ade *organizationstypes.AccessDeniedException
+	return errors.As(err, &ade)
 }
