@@ -4,27 +4,41 @@ import (
 	"fmt"
 
 	"github.com/pfrederiksen/aws-access-map/internal/graph"
+	"github.com/pfrederiksen/aws-access-map/internal/policy/conditions"
 	"github.com/pfrederiksen/aws-access-map/pkg/types"
 )
 
 // Engine handles queries against the access graph
 type Engine struct {
-	graph *graph.Graph
+	graph   *graph.Graph
+	context *conditions.EvaluationContext
 }
 
-// New creates a new query engine
+// New creates a new query engine with default permissive context
 func New(g *graph.Graph) *Engine {
-	return &Engine{graph: g}
+	return &Engine{
+		graph:   g,
+		context: conditions.NewDefaultContext(),
+	}
+}
+
+// WithContext returns a new engine with the specified evaluation context
+func (e *Engine) WithContext(ctx *conditions.EvaluationContext) *Engine {
+	return &Engine{
+		graph:   e.graph,
+		context: ctx,
+	}
 }
 
 // WhoCan finds all principals that can perform an action on a resource
+// Uses the engine's evaluation context for condition evaluation
 func (e *Engine) WhoCan(resourceARN, action string) ([]*types.Principal, error) {
 	var result []*types.Principal
 
 	// Check all principals
 	for _, principal := range e.graph.GetAllPrincipals() {
-		// Check direct access
-		if e.graph.CanAccess(principal.ARN, action, resourceARN) {
+		// Check direct access with context
+		if e.graph.CanAccess(principal.ARN, action, resourceARN, e.context) {
 			result = append(result, principal)
 		}
 	}
@@ -72,8 +86,8 @@ func (e *Engine) FindPaths(fromPrincipalARN, toResourceARN, action string) ([]*t
 			continue
 		}
 
-		// Check if current principal can access the target resource
-		if e.graph.CanAccess(current.principalARN, action, toResourceARN) {
+		// Check if current principal can access the target resource (with context)
+		if e.graph.CanAccess(current.principalARN, action, toResourceARN, e.context) {
 			resource, ok := e.graph.GetResource(toResourceARN)
 			if !ok {
 				// Resource doesn't exist in graph, but permission edge exists

@@ -2,11 +2,20 @@ package graph
 
 import (
 	"fmt"
+	"log"
 	"sync"
 
 	"github.com/pfrederiksen/aws-access-map/internal/policy"
+	"github.com/pfrederiksen/aws-access-map/internal/policy/conditions"
 	"github.com/pfrederiksen/aws-access-map/pkg/types"
 )
+
+// PermissionEdge represents a permission edge with optional conditions
+type PermissionEdge struct {
+	ResourceARN string
+	Conditions  map[string]map[string]interface{} // AWS condition format
+	PolicyName  string                            // For debugging/display
+}
 
 // Graph represents the access graph
 type Graph struct {
@@ -17,14 +26,14 @@ type Graph struct {
 	resources  map[string]*types.Resource  // ARN -> Resource
 
 	// Edges
-	// principalActions[principalARN][action] = []resourceARN
-	principalActions map[string]map[string][]string
+	// principalActions[principalARN][action] = []PermissionEdge
+	principalActions map[string]map[string][]PermissionEdge
 
 	// trustRelations[roleARN] = []principalARN (who can assume this role)
 	trustRelations map[string][]string
 
-	// denies[principalARN][action] = []resourceARN
-	denies map[string]map[string][]string
+	// denies[principalARN][action] = []PermissionEdge
+	denies map[string]map[string][]PermissionEdge
 }
 
 // New creates a new empty graph
@@ -32,9 +41,9 @@ func New() *Graph {
 	return &Graph{
 		principals:       make(map[string]*types.Principal),
 		resources:        make(map[string]*types.Resource),
-		principalActions: make(map[string]map[string][]string),
+		principalActions: make(map[string]map[string][]PermissionEdge),
 		trustRelations:   make(map[string][]string),
-		denies:           make(map[string]map[string][]string),
+		denies:           make(map[string]map[string][]PermissionEdge),
 	}
 }
 
@@ -91,20 +100,32 @@ func (g *Graph) AddResource(r *types.Resource) {
 }
 
 // AddEdge adds a permission edge (principal can perform action on resource)
+// For backward compatibility, this creates an edge with no conditions
 func (g *Graph) AddEdge(principalARN, action, resourceARN string, isDeny bool) {
+	g.AddEdgeWithConditions(principalARN, action, resourceARN, isDeny, nil, "")
+}
+
+// AddEdgeWithConditions adds a permission edge with optional conditions
+func (g *Graph) AddEdgeWithConditions(principalARN, action, resourceARN string, isDeny bool, conditions map[string]map[string]interface{}, policyName string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
+	edge := PermissionEdge{
+		ResourceARN: resourceARN,
+		Conditions:  conditions,
+		PolicyName:  policyName,
+	}
+
 	if isDeny {
 		if g.denies[principalARN] == nil {
-			g.denies[principalARN] = make(map[string][]string)
+			g.denies[principalARN] = make(map[string][]PermissionEdge)
 		}
-		g.denies[principalARN][action] = append(g.denies[principalARN][action], resourceARN)
+		g.denies[principalARN][action] = append(g.denies[principalARN][action], edge)
 	} else {
 		if g.principalActions[principalARN] == nil {
-			g.principalActions[principalARN] = make(map[string][]string)
+			g.principalActions[principalARN] = make(map[string][]PermissionEdge)
 		}
-		g.principalActions[principalARN][action] = append(g.principalActions[principalARN][action], resourceARN)
+		g.principalActions[principalARN][action] = append(g.principalActions[principalARN][action], edge)
 	}
 }
 
@@ -157,19 +178,40 @@ func (g *Graph) GetAllResources() []*types.Resource {
 }
 
 // CanAccess checks if a principal can perform an action on a resource
-func (g *Graph) CanAccess(principalARN, action, resourceARN string) bool {
+// Optional context parameter for condition evaluation (backward compatible)
+func (g *Graph) CanAccess(principalARN, action, resourceARN string, ctx ...*conditions.EvaluationContext) bool {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
+
+	// Use default context if not provided (permissive behavior)
+	var evalCtx *conditions.EvaluationContext
+	if len(ctx) > 0 {
+		evalCtx = ctx[0]
+	} else {
+		evalCtx = conditions.NewDefaultContext()
+	}
 
 	// Check for explicit deny first (deny always wins)
 	// Need to check all action patterns, not just exact match
 	if actionMap, ok := g.denies[principalARN]; ok {
-		for actionPattern, deniedResources := range actionMap {
+		for actionPattern, denyEdges := range actionMap {
 			// Check if the action pattern matches the queried action
 			if policy.MatchesAction(actionPattern, action) {
-				for _, denied := range deniedResources {
-					if matchesPattern(denied, resourceARN) {
-						return false
+				for _, edge := range denyEdges {
+					if matchesPattern(edge.ResourceARN, resourceARN) {
+						// Evaluate conditions
+						matched, err := conditions.Evaluate(edge.Conditions, evalCtx)
+						if err != nil {
+							// For deny rules, fail closed (conservative) - if we can't
+							// evaluate the condition, assume the deny applies for safety
+							log.Printf("Warning: Failed to evaluate deny condition for %s on %s: %v (assuming deny applies)",
+								principalARN, resourceARN, err)
+							return false
+						}
+						if matched {
+							// Deny condition matched - explicit deny wins
+							return false
+						}
 					}
 				}
 			}
@@ -178,12 +220,24 @@ func (g *Graph) CanAccess(principalARN, action, resourceARN string) bool {
 
 	// Check for allow - also need to check action patterns
 	if actionMap, ok := g.principalActions[principalARN]; ok {
-		for actionPattern, allowedResources := range actionMap {
+		for actionPattern, allowEdges := range actionMap {
 			// Check if the action pattern matches the queried action
 			if policy.MatchesAction(actionPattern, action) {
-				for _, allowed := range allowedResources {
-					if matchesPattern(allowed, resourceARN) {
-						return true
+				for _, edge := range allowEdges {
+					if matchesPattern(edge.ResourceARN, resourceARN) {
+						// Evaluate conditions
+						matched, err := conditions.Evaluate(edge.Conditions, evalCtx)
+						if err != nil {
+							// For allow rules, skip this edge if condition can't be evaluated
+							// (this particular allow doesn't apply, but others might)
+							log.Printf("Warning: Failed to evaluate allow condition for %s on %s: %v (skipping this allow)",
+								principalARN, resourceARN, err)
+							continue
+						}
+						if matched {
+							// Allow condition matched
+							return true
+						}
 					}
 				}
 			}
@@ -256,7 +310,8 @@ func (g *Graph) addPolicyEdges(principalARN string, policy types.PolicyDocument)
 
 		for _, action := range actions {
 			for _, resource := range resources {
-				g.AddEdge(principalARN, action, resource, isDeny)
+				// Preserve conditions from the statement
+				g.AddEdgeWithConditions(principalARN, action, resource, isDeny, stmt.Condition, stmt.Sid)
 			}
 		}
 	}
@@ -303,9 +358,10 @@ func (g *Graph) addResourcePolicyEdges(resourceARN string, policy types.PolicyDo
 				principalARN = "*"
 			}
 
-			// Add edge from principal to resource for each action
+				// Add edge from principal to resource for each action
+			// Preserve conditions from resource policy
 			for _, action := range actions {
-				g.AddEdge(principalARN, action, resourceARN, isDeny)
+				g.AddEdgeWithConditions(principalARN, action, resourceARN, isDeny, stmt.Condition, stmt.Sid)
 			}
 		}
 	}

@@ -155,6 +155,60 @@ aws-access-map collect
 # Parse the collected data to see all their policies
 ```
 
+### Condition-Based Access Control: IP Restrictions
+
+**Scenario:** Your policies require office IP access. Verify if users can access from home.
+
+```bash
+# Check if admin can access from office IP (should work)
+aws-access-map who-can "*" --action "*" \
+  --source-ip "203.0.113.50"
+
+# Check if admin can access from home IP (should be blocked if IP-restricted)
+aws-access-map who-can "*" --action "*" \
+  --source-ip "192.0.2.1"
+```
+
+**Real policy example:**
+```json
+{
+  "Effect": "Allow",
+  "Action": "*",
+  "Resource": "*",
+  "Condition": {
+    "IpAddress": {
+      "aws:SourceIp": "203.0.113.0/24"
+    }
+  }
+}
+```
+
+### MFA-Protected Resources
+
+**Scenario:** Sensitive operations require MFA. Verify MFA enforcement.
+
+```bash
+# Check if user can perform sensitive action without MFA (should be denied)
+aws-access-map who-can "arn:aws:iam::*:*" --action "iam:DeleteUser"
+
+# Check with MFA (should be allowed if policy requires MFA)
+aws-access-map who-can "arn:aws:iam::*:*" --action "iam:DeleteUser" --mfa
+```
+
+**Real policy example:**
+```json
+{
+  "Effect": "Allow",
+  "Action": "iam:*",
+  "Resource": "*",
+  "Condition": {
+    "Bool": {
+      "aws:MultiFactorAuthPresent": "true"
+    }
+  }
+}
+```
+
 ## Commands
 
 ### `collect`
@@ -198,7 +252,50 @@ aws-access-map who-can "arn:aws:kms:us-east-1:*:key/*" --action "kms:Decrypt"
 - ✅ Queries resource-based policies (S3, KMS, SQS, SNS, Secrets Manager)
 - ✅ Full wildcard matching (supports `*`, `s3:Get*`, `iam:*User*`, etc.)
 - ✅ JSON output format with `--format json` flag
-- ⏳ Condition evaluation not yet supported
+- ✅ **Condition evaluation** with runtime context (IP, MFA, Org ID, dates, etc.)
+
+**Condition Evaluation:**
+
+AWS policies often include conditions that must be met for access to be granted. aws-access-map now supports evaluating these conditions with runtime context:
+
+```bash
+# Check if user can access from specific IP (evaluates IpAddress conditions)
+aws-access-map who-can "arn:aws:s3:::bucket/*" --action "s3:GetObject" \
+  --source-ip "203.0.113.50"
+
+# Check access with MFA required (evaluates Bool conditions)
+aws-access-map who-can "*" --action "*" --mfa
+
+# Check cross-account access with org restriction (evaluates StringEquals conditions)
+aws-access-map who-can "arn:aws:s3:::shared-bucket/*" --action "s3:*" \
+  --org-id "o-123456"
+
+# Check principal-specific conditions
+aws-access-map who-can "arn:aws:s3:::bucket/*" --action "s3:GetObject" \
+  --principal-arn "arn:aws:iam::123456789012:user/alice"
+
+# Combine multiple conditions
+aws-access-map who-can "*" --action "*" \
+  --source-ip "203.0.113.50" \
+  --mfa \
+  --org-id "o-123456"
+```
+
+**Supported condition operators (22 total):**
+- **String**: StringEquals, StringNotEquals, StringLike (case-sensitive, `*` wildcard)
+- **Boolean**: Bool (aws:MultiFactorAuthPresent, aws:SecureTransport)
+- **IP Address**: IpAddress, NotIpAddress (CIDR blocks, e.g., `203.0.113.0/24`)
+- **Numeric**: NumericEquals, NumericNotEquals, NumericLessThan, NumericLessThanEquals, NumericGreaterThan, NumericGreaterThanEquals
+- **Date**: DateEquals, DateNotEquals, DateLessThan, DateLessThanEquals, DateGreaterThan, DateGreaterThanEquals
+- **ARN**: ArnEquals, ArnNotEquals, ArnLike, ArnNotLike (ARN pattern matching)
+
+**Condition flags:**
+- `--source-ip IP`: Source IP for IpAddress conditions (e.g., `203.0.113.50`)
+- `--mfa`: Assume MFA is authenticated (aws:MultiFactorAuthPresent = true)
+- `--org-id ID`: Principal's organization ID (e.g., `o-123456`)
+- `--principal-arn ARN`: Principal ARN for ArnEquals/ArnLike conditions
+
+**Default behavior:** When condition flags are not provided, the tool uses permissive defaults (conditions pass by default). This maintains backward compatibility while allowing opt-in strict evaluation.
 
 ### `path`
 Discover access paths from one principal to a resource.
@@ -285,14 +382,15 @@ aws-access-map report --format json                 # JSON output for CI/CD
 - Build in-memory permission graph with resource policies
 - Query direct access (`who-can`, `path` commands)
 - **Role assumption chain traversal** (multi-hop path finding with BFS)
+- **Policy condition evaluation** with 22 operators (String, Bool, IP, Numeric, Date, ARN)
 - Security audit reports with 5 high-risk pattern detections
 - JSON output format for CI/CD automation
 - Full wildcard matching (glob patterns: `*`, `s3:Get*`, `iam:*User*`)
-- 87%+ test coverage with 70+ comprehensive tests
+- 90%+ test coverage with 100+ comprehensive tests
 
 **⚠️  Limitations**
-- Policy conditions are not evaluated (future feature)
 - Single account only (multi-account planned for future release)
+- Some advanced condition operators not yet supported (IfExists variants, ForAllValues, ForAnyValue)
 
 See [TESTING.md](TESTING.md) for detailed test results and known issues.
 

@@ -105,6 +105,8 @@ func printPathsJSON(from, to, action string, paths []*types.AccessPath) error {
 				},
 				Action:     hop.Action,
 				PolicyType: string(hop.PolicyType),
+				PolicyName: hop.PolicyName,
+				Conditions: hop.Conditions,
 			}
 
 			// Handle To field (can be Principal or Resource)
@@ -157,10 +159,28 @@ func printPathsText(from, to, action string, paths []*types.AccessPath) error {
 			default:
 				toStr = fmt.Sprintf("%v", v)
 			}
-			fmt.Printf("  %d. %s -[%s]-> %s\n", j+1, hop.From.Name, hop.Action, toStr)
+
+			// Show hop details
+			fmt.Printf("  %d. %s -[%s]-> %s", j+1, hop.From.Name, hop.Action, toStr)
+
+			// Show policy name if present
+			if hop.PolicyName != "" {
+				fmt.Printf(" (via %s)", hop.PolicyName)
+			}
+			fmt.Println()
+
+			// Show conditions for this hop if present
+			if len(hop.Conditions) > 0 {
+				fmt.Println("     Conditions:")
+				for _, cond := range hop.Conditions {
+					fmt.Printf("       - %s\n", cond)
+				}
+			}
 		}
+
+		// Show path-level conditions if present (deprecated, but keep for backward compatibility)
 		if len(path.Conditions) > 0 {
-			fmt.Println("  Conditions:")
+			fmt.Println("  Path Conditions:")
 			for _, cond := range path.Conditions {
 				fmt.Printf("    - %s\n", cond)
 			}
