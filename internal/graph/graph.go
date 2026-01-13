@@ -478,10 +478,16 @@ func (g *Graph) addResourcePolicyEdges(resourceARN string, policy types.PolicyDo
 		principals := extractPrincipals(stmt.Principal)
 		actions := normalizeToSlice(stmt.Action)
 		notActions := normalizeToSlice(stmt.NotAction)
+		resources := normalizeToSlice(stmt.Resource)
 
 		// Handle precedence: NotAction without Action means apply to all actions except NotAction
 		if len(notActions) > 0 && len(actions) == 0 {
 			actions = []string{"*"}
+		}
+
+		// If no Resource specified in statement, use the resourceARN parameter (the resource itself)
+		if len(resources) == 0 {
+			resources = []string{resourceARN}
 		}
 
 		isDeny := stmt.Effect == types.EffectDeny
@@ -505,7 +511,9 @@ func (g *Graph) addResourcePolicyEdges(resourceARN string, policy types.PolicyDo
 			// Preserve conditions from resource policy
 			// Note: NotResource doesn't make sense for resource policies (the resource is already fixed)
 			for _, action := range actions {
-				g.AddEdgeWithConditions(principalARN, action, resourceARN, isDeny, stmt.Condition, stmt.Sid, notActions, nil)
+				for _, resource := range resources {
+					g.AddEdgeWithConditions(principalARN, action, resource, isDeny, stmt.Condition, stmt.Sid, notActions, nil)
+				}
 			}
 		}
 	}
