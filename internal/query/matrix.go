@@ -326,6 +326,9 @@ func (m AccessMatrix) GetDenseRegions(threshold float64) []DenseRegion {
 			}
 		}
 
+		if len(m.Resources) == 0 {
+			continue // Avoid division by zero
+		}
 		density := float64(accessCount) / float64(len(m.Resources))
 		if density >= threshold {
 			regions = append(regions, DenseRegion{
@@ -346,6 +349,9 @@ func (m AccessMatrix) GetDenseRegions(threshold float64) []DenseRegion {
 			}
 		}
 
+		if len(m.Principals) == 0 {
+			continue // Avoid division by zero
+		}
 		density := float64(accessCount) / float64(len(m.Principals))
 		if density >= threshold {
 			regions = append(regions, DenseRegion{

@@ -303,7 +303,7 @@ jq '.Principals[] | select(.Type == "role") | .TrustPolicy' testdata/collected-d
 
 ## Implementation Status
 
-### ✅ Completed (as of v0.7.0)
+### ✅ Completed (as of v1.0.0)
 
 1. **Condition evaluation** (v0.4.0): Full support for 22 condition operators (IP, MFA, dates, ARNs, strings, numerics)
 2. **Service Control Policies** (v0.5.0): Organization-level policy evaluation with OU hierarchy
@@ -315,16 +315,19 @@ jq '.Principals[] | select(.Type == "role") | .TrustPolicy' testdata/collected-d
 8. **Additional resource types** (v0.7.0): Lambda, API Gateway, ECR, EventBridge policy collection
 9. **Policy simulation** (v0.7.0): Test policies locally without AWS credentials, CI/CD integration
 10. **Incremental caching** (v0.7.0): Delta-based collection with 10x speedup for large accounts
+11. **NotAction/NotResource** (v1.0.0): Complete inverse policy logic evaluation, edge metadata storage, 9 evaluation points updated
+12. **13 Security pattern detectors** (v1.0.0): Admin access, public exposure, privilege escalation, missing MFA, direct user policies, overly permissive Lambda roles, wildcard resource policies, cross-region access, broad network access, missing resource policies
+13. **Quantitative risk scoring** (v1.0.0): Impact × Likelihood × Multiplier formula, severity mapping (CRITICAL/HIGH/MEDIUM/LOW/INFO)
+14. **Compliance reporting** (v1.0.0): CIS AWS Foundations, PCI-DSS v3.2.1, SOC 2 frameworks with automatic finding-to-control mapping
+15. **Access matrices** (v1.0.0): Principal × resource grid generation, dense region detection, CSV export
 
 ### 🚧 Future Enhancements
 
 1. **Resource tagging**: Tag-based policy evaluation and filtering
-2. **NotAction/NotResource**: Support for inverse policy logic
-3. **Real-time updates**: Watch for policy changes and auto-refresh
-4. **Visualization**: Export to graph visualization tools (Neo4j, Gephi)
-5. **Risk scoring**: Calculate quantitative risk scores for access paths
-6. **Remediation**: AI-powered policy recommendations to reduce risk
-7. **Web UI**: Optional web interface for visual exploration
+2. **Real-time updates**: Watch for policy changes and auto-refresh
+3. **Visualization**: Export to graph visualization tools (Neo4j, Gephi)
+4. **Remediation**: AI-powered policy recommendations to reduce risk
+5. **Web UI**: Optional web interface for visual exploration
 
 ## Debugging Tips
 

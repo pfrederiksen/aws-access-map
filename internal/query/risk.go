@@ -141,8 +141,7 @@ func calculateLikelihood(finding HighRiskFinding, context RiskContext) float64 {
 		likelihood = 4.0 // Defense-in-depth gap
 	case "Cross-Region Resource Access":
 		likelihood = 2.0 // Low security risk, mostly data sovereignty
-	default:
-		likelihood = 5.0
+		// default case omitted - uses initial value of 5.0
 	}
 
 	// Adjust based on severity (correlation with likelihood)
