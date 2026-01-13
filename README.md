@@ -8,7 +8,7 @@ One command. One answer. No UI required.
 
 ---
 
-📚 **Documentation**: [README](README.md) · [Examples](EXAMPLES.md) · [Contributing](CONTRIBUTING.md) · [Architecture](CLAUDE.md) · [Testing](TESTING.md)
+📚 **Documentation**: [README](README.md) · [Examples](EXAMPLES.md) · [Permissions](PERMISSIONS.md) · [Contributing](CONTRIBUTING.md) · [Architecture](CLAUDE.md) · [Testing](TESTING.md)
 
 ---
 
@@ -51,8 +51,8 @@ aws-access-map report --high-risk
 - Identity-based policies (inline + managed)
 - Resource policies (S3, KMS, SQS, SNS, Secrets Manager)
 - Role trust policies and assumption chains
-- Service Control Policies (SCPs)
-- Permission boundaries
+- ✅ Service Control Policies (SCPs) with OU hierarchy
+- Permission boundaries (coming soon)
 - Resource-based grants
 
 ## Installation
@@ -215,13 +215,14 @@ aws-access-map who-can "arn:aws:iam::*:*" --action "iam:DeleteUser" --mfa
 Fetch IAM data from your AWS account and save it locally.
 
 ```bash
-aws-access-map collect [--output FILE] [--profile PROFILE] [--region REGION] [--format FORMAT]
+aws-access-map collect [--output FILE] [--profile PROFILE] [--region REGION] [--format FORMAT] [--include-scps]
 
 # Examples:
 aws-access-map collect                              # Saves to aws-access-data.json
 aws-access-map collect --output prod-account.json   # Custom filename
 aws-access-map collect --profile prod               # Use specific AWS profile
 aws-access-map collect --format json                # JSON output (machine-readable)
+aws-access-map collect --include-scps               # Include Service Control Policies (requires Organizations access)
 ```
 
 **What it collects:**
@@ -232,8 +233,38 @@ aws-access-map collect --format json                # JSON output (machine-reada
 - ✅ SQS queue policies
 - ✅ SNS topic policies
 - ✅ Secrets Manager resource policies
+- ✅ **Service Control Policies (SCPs)** with `--include-scps` flag (requires Organizations access)
 - ⏳ IAM groups (roadmap)
-- ⏳ Service Control Policies (roadmap)
+
+**Service Control Policies (SCPs):**
+
+SCPs are organization-level policies that set maximum permissions for accounts in AWS Organizations. When collected, aws-access-map automatically:
+
+1. **Fetches SCP targets**: Determines which accounts/OUs each SCP is attached to
+2. **Resolves OU hierarchy**: Traverses the organizational unit tree to determine which OUs your account belongs to
+3. **Filters SCPs accurately**: Only applies SCPs that are attached to:
+   - Your account directly
+   - An OU that contains your account
+   - The organization root (applies to all accounts)
+4. **Evaluates SCPs first**: SCPs are checked BEFORE identity and resource policies (matching AWS behavior)
+
+**Requirements for SCP collection:**
+- Must run from AWS Organizations management account (or delegated admin)
+- Requires Organizations read permissions (see [PERMISSIONS.md](PERMISSIONS.md))
+- Gracefully skips SCPs if permissions unavailable
+
+**Example:**
+```bash
+# From management account with Organizations access
+aws-access-map collect --include-scps
+
+# Output includes:
+# "Collected 5 Service Control Policies (SCPs)"
+#
+# SCPs will be automatically applied during who-can and path queries
+```
+
+See [PERMISSIONS.md](PERMISSIONS.md) for detailed IAM permission requirements.
 
 ### `who-can`
 Find all principals that can perform an action on a resource.
@@ -378,6 +409,7 @@ aws-access-map report --format json                 # JSON output for CI/CD
 **✅ Working**
 - Collect IAM users and roles from AWS
 - Collect resource policies (S3, KMS, SQS, SNS, Secrets Manager)
+- **Service Control Policies (SCPs)** with OU hierarchy tracking and accurate filtering
 - Parse inline and managed policies
 - Build in-memory permission graph with resource policies
 - Query direct access (`who-can`, `path` commands)
@@ -447,7 +479,7 @@ See [CLAUDE.md](CLAUDE.md) for development guide and architecture deep dive.
 A: ✅ **100% free.** The software is open source (MIT license) and IAM API calls have no charge in AWS. See [COST.md](COST.md) for detailed breakdown. When we add S3/KMS collection, costs are negligible (<$0.05 per run).
 
 **Q: Does this require special permissions?**
-A: It needs read-only IAM permissions (`iam:Get*`, `iam:List*`). Recommended: AWS managed `SecurityAudit` policy. The tool is completely read-only and cannot modify your AWS resources.
+A: It needs read-only IAM permissions (`iam:Get*`, `iam:List*`). For SCP collection, Organizations read permissions are required. See [PERMISSIONS.md](PERMISSIONS.md) for complete details. The tool is completely read-only and cannot modify your AWS resources.
 
 **Q: Is my data sent anywhere?**
 A: No. Everything runs locally on your machine. Data is only fetched from AWS and stored in a local JSON file. No telemetry, no cloud services, no third parties.
