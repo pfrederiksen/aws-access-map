@@ -258,8 +258,10 @@ func printCollectJSON(result *types.CollectionResult) error {
 		CollectedAt:    result.CollectedAt,
 		PrincipalCount: len(result.Principals),
 		ResourceCount:  len(result.Resources),
+		SCPCount:       len(result.SCPs),
 		Principals:     make([]PrincipalOutput, len(result.Principals)),
 		Resources:      make([]ResourceOutput, len(result.Resources)),
+		SCPs:           make([]SCPOutput, len(result.SCPs)),
 	}
 
 	for i, p := range result.Principals {
@@ -281,6 +283,13 @@ func printCollectJSON(result *types.CollectionResult) error {
 		}
 	}
 
+	for i, scp := range result.SCPs {
+		output.SCPs[i] = SCPOutput{
+			ID: scp.ID,
+			// SCPs don't have Name field in PolicyDocument, using ID as identifier
+		}
+	}
+
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(output)
@@ -290,6 +299,13 @@ func printCollectJSON(result *types.CollectionResult) error {
 func printCollectText(result *types.CollectionResult, outputFile string) error {
 	fmt.Printf("Collected %d principals\n", len(result.Principals))
 	fmt.Printf("Collected %d resources\n", len(result.Resources))
+
+	if len(result.SCPs) > 0 {
+		fmt.Printf("Collected %d Service Control Policies (SCPs)\n", len(result.SCPs))
+	} else {
+		fmt.Println("No SCPs collected (use --include-scps flag to collect organization policies)")
+	}
+
 	fmt.Printf("Data saved to %s\n", outputFile)
 	return nil
 }

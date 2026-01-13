@@ -74,6 +74,15 @@ type CollectOutput struct {
 	CollectedAt    time.Time         `json:"collected_at"`
 	PrincipalCount int               `json:"principal_count"`
 	ResourceCount  int               `json:"resource_count"`
+	SCPCount       int               `json:"scp_count"`
 	Principals     []PrincipalOutput `json:"principals,omitempty"`
 	Resources      []ResourceOutput  `json:"resources,omitempty"`
+	SCPs           []SCPOutput       `json:"scps,omitempty"`
+}
+
+// SCPOutput represents a Service Control Policy in JSON output
+type SCPOutput struct {
+	ID          string `json:"id"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
 }

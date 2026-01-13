@@ -277,3 +277,192 @@ func TestPrintReport_NoFindings(t *testing.T) {
 		t.Error("Expected 'No high-risk findings' message")
 	}
 }
+
+func TestPrintCollect_JSON_WithSCPs(t *testing.T) {
+	// Capture stdout
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	result := &types.CollectionResult{
+		AccountID: "123456789012",
+		Regions:   []string{"us-east-1"},
+		Principals: []*types.Principal{
+			{
+				ARN:  "arn:aws:iam::123456789012:user/admin",
+				Type: types.PrincipalTypeUser,
+				Name: "admin",
+			},
+		},
+		Resources: []*types.Resource{
+			{
+				ARN:  "arn:aws:s3:::bucket",
+				Type: types.ResourceTypeS3,
+				Name: "bucket",
+			},
+		},
+		SCPs: []types.PolicyDocument{
+			{
+				ID:      "p-abc123",
+				Version: "2012-10-17",
+			},
+			{
+				ID:      "p-def456",
+				Version: "2012-10-17",
+			},
+		},
+	}
+
+	err := PrintCollect("json", result, "test.json")
+	if err != nil {
+		t.Fatalf("PrintCollect() error = %v", err)
+	}
+
+	// Restore stdout and read output
+	w.Close()
+	os.Stdout = old
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, r) // Ignore error in test
+
+	// Parse JSON to verify it's valid
+	var output CollectOutput
+	if err := json.Unmarshal(buf.Bytes(), &output); err != nil {
+		t.Fatalf("Failed to parse JSON output: %v\nOutput: %s", err, buf.String())
+	}
+
+	// Verify SCP fields
+	if output.SCPCount != 2 {
+		t.Errorf("Expected SCPCount 2, got %d", output.SCPCount)
+	}
+
+	if len(output.SCPs) != 2 {
+		t.Fatalf("Expected 2 SCPs, got %d", len(output.SCPs))
+	}
+
+	if output.SCPs[0].ID != "p-abc123" {
+		t.Errorf("Expected first SCP ID 'p-abc123', got '%s'", output.SCPs[0].ID)
+	}
+}
+
+func TestPrintCollect_JSON_NoSCPs(t *testing.T) {
+	// Capture stdout
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	result := &types.CollectionResult{
+		AccountID: "123456789012",
+		Regions:   []string{"us-east-1"},
+		Principals: []*types.Principal{
+			{
+				ARN:  "arn:aws:iam::123456789012:user/admin",
+				Type: types.PrincipalTypeUser,
+				Name: "admin",
+			},
+		},
+		SCPs: []types.PolicyDocument{}, // Empty SCP list
+	}
+
+	err := PrintCollect("json", result, "test.json")
+	if err != nil {
+		t.Fatalf("PrintCollect() error = %v", err)
+	}
+
+	// Restore stdout and read output
+	w.Close()
+	os.Stdout = old
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, r) // Ignore error in test
+
+	// Parse JSON to verify it's valid
+	var output CollectOutput
+	if err := json.Unmarshal(buf.Bytes(), &output); err != nil {
+		t.Fatalf("Failed to parse JSON output: %v\nOutput: %s", err, buf.String())
+	}
+
+	// Verify SCP fields
+	if output.SCPCount != 0 {
+		t.Errorf("Expected SCPCount 0, got %d", output.SCPCount)
+	}
+
+	if len(output.SCPs) != 0 {
+		t.Errorf("Expected 0 SCPs, got %d", len(output.SCPs))
+	}
+}
+
+func TestPrintCollect_Text_WithSCPs(t *testing.T) {
+	// Capture stdout
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	result := &types.CollectionResult{
+		AccountID: "123456789012",
+		Principals: []*types.Principal{
+			{
+				ARN:  "arn:aws:iam::123456789012:user/admin",
+				Type: types.PrincipalTypeUser,
+				Name: "admin",
+			},
+		},
+		Resources: []*types.Resource{},
+		SCPs: []types.PolicyDocument{
+			{
+				ID: "p-abc123",
+			},
+		},
+	}
+
+	err := PrintCollect("text", result, "test.json")
+	if err != nil {
+		t.Fatalf("PrintCollect() error = %v", err)
+	}
+
+	// Restore stdout and read output
+	w.Close()
+	os.Stdout = old
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, r) // Ignore error in test
+
+	output := buf.String()
+
+	// Verify SCP message is present
+	if !bytes.Contains(buf.Bytes(), []byte("Collected 1 Service Control Policies")) {
+		t.Errorf("Expected output to contain 'Collected 1 Service Control Policies', got: %s", output)
+	}
+
+	// Verify flag hint is NOT present when SCPs are collected
+	if bytes.Contains(buf.Bytes(), []byte("--include-scps flag")) {
+		t.Error("Expected output to NOT contain '--include-scps flag' hint when SCPs are collected")
+	}
+}
+
+func TestPrintCollect_Text_NoSCPs(t *testing.T) {
+	// Capture stdout
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	result := &types.CollectionResult{
+		AccountID:  "123456789012",
+		Principals: []*types.Principal{},
+		Resources:  []*types.Resource{},
+		SCPs:       []types.PolicyDocument{}, // Empty SCP list
+	}
+
+	err := PrintCollect("text", result, "test.json")
+	if err != nil {
+		t.Fatalf("PrintCollect() error = %v", err)
+	}
+
+	// Restore stdout and read output
+	w.Close()
+	os.Stdout = old
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, r) // Ignore error in test
+
+	// Verify flag hint is present when SCPs are not collected
+	if !bytes.Contains(buf.Bytes(), []byte("--include-scps flag")) {
+		t.Error("Expected output to contain '--include-scps flag' hint when SCPs are not collected")
+	}
+}
