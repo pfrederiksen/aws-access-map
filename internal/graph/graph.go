@@ -428,21 +428,93 @@ func matchesPattern(pattern, arn string) bool {
 	return policy.MatchesResource(pattern, arn)
 }
 
-// isBlockedBySCP checks if a Service Control Policy denies the action
-// SCPs are restrictive - they can only deny, never allow
-// If NO SCP explicitly denies, the action is allowed (from SCP perspective)
+// isBlockedBySCP checks if a Service Control Policy blocks the action
+// SCPs act as permission boundaries (allowlists):
+// 1. Actions must be explicitly allowed by at least one SCP
+// 2. If no SCP allows an action, it is implicitly denied
+// 3. Explicit denies override any allows
 func (g *Graph) isBlockedBySCP(principalARN, action, resourceARN string, ctx *conditions.EvaluationContext) bool {
 	// Root user is not affected by SCPs (AWS special case)
 	if isRootUser(principalARN) {
 		return false
 	}
 
-	// Check each SCP for explicit deny
+	// If no SCPs exist, nothing is blocked (from SCP perspective)
+	if len(g.scps) == 0 {
+		return false
+	}
+
+	// Step 1: Check if action is explicitly allowed by at least one SCP
+	hasExplicitAllow := false
 	for _, scp := range g.scps {
 		for _, stmt := range scp.Statements {
-			// SCPs use Deny effect explicitly
+			if stmt.Effect != types.EffectAllow {
+				continue
+			}
+
+			// Check if this SCP allow applies to the action
+			actions := normalizeToSlice(stmt.Action)
+			resources := normalizeToSlice(stmt.Resource)
+
+			// Check if action matches
+			actionMatches := false
+			for _, scpAction := range actions {
+				if policy.MatchesAction(scpAction, action) {
+					actionMatches = true
+					break
+				}
+			}
+
+			if !actionMatches {
+				continue
+			}
+
+			// Check if resource matches
+			resourceMatches := false
+			for _, scpResource := range resources {
+				if matchesPattern(scpResource, resourceARN) {
+					resourceMatches = true
+					break
+				}
+			}
+
+			if !resourceMatches {
+				continue
+			}
+
+			// Check conditions if present
+			if len(stmt.Condition) > 0 {
+				matched, err := conditions.Evaluate(stmt.Condition, ctx)
+				if err != nil {
+					// Fail closed for allow conditions - if we can't evaluate, skip this allow
+					log.Printf("Warning: Failed to evaluate SCP allow condition (policy %s): %v (skipping this allow)", scp.ID, err)
+					continue
+				}
+				if !matched {
+					// Conditions didn't match, allow doesn't apply
+					continue
+				}
+			}
+
+			// Found an explicit allow
+			hasExplicitAllow = true
+			break
+		}
+
+		if hasExplicitAllow {
+			break
+		}
+	}
+
+	// Step 2: If no explicit allow found, action is implicitly denied
+	if !hasExplicitAllow {
+		return true
+	}
+
+	// Step 3: Check for explicit deny (deny overrides allow)
+	for _, scp := range g.scps {
+		for _, stmt := range scp.Statements {
 			if stmt.Effect != types.EffectDeny {
-				// Allow statements in SCPs don't grant access, skip
 				continue
 			}
 
@@ -480,8 +552,8 @@ func (g *Graph) isBlockedBySCP(principalARN, action, resourceARN string, ctx *co
 			if len(stmt.Condition) > 0 {
 				matched, err := conditions.Evaluate(stmt.Condition, ctx)
 				if err != nil {
-					// Fail closed for SCP conditions (security-first)
-					log.Printf("Warning: Failed to evaluate SCP condition (policy %s): %v (assuming deny applies)", scp.ID, err)
+					// Fail closed for SCP deny conditions (security-first)
+					log.Printf("Warning: Failed to evaluate SCP deny condition (policy %s): %v (assuming deny applies)", scp.ID, err)
 					return true
 				}
 				if !matched {
@@ -495,7 +567,7 @@ func (g *Graph) isBlockedBySCP(principalARN, action, resourceARN string, ctx *co
 		}
 	}
 
-	// No SCP denied the action
+	// Has explicit allow and no explicit deny
 	return false
 }
 

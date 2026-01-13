@@ -12,9 +12,14 @@ func TestIsBlockedBySCP_ExplicitDeny(t *testing.T) {
 	g := New()
 	g.scps = []types.PolicyDocument{
 		{
-			ID:      "scp-deny-s3-delete",
+			ID:      "scp-allow-and-deny",
 			Version: "2012-10-17",
 			Statements: []types.Statement{
+				{
+					Effect:   types.EffectAllow,
+					Action:   "*",
+					Resource: "*",
+				},
 				{
 					Effect:   types.EffectDeny,
 					Action:   "s3:DeleteBucket",
@@ -26,12 +31,12 @@ func TestIsBlockedBySCP_ExplicitDeny(t *testing.T) {
 
 	ctx := conditions.NewDefaultContext()
 
-	// Should be blocked
+	// Should be blocked by explicit deny
 	if !g.isBlockedBySCP("arn:aws:iam::123456789012:user/alice", "s3:DeleteBucket", "arn:aws:s3:::my-bucket", ctx) {
 		t.Error("Expected SCP to block s3:DeleteBucket")
 	}
 
-	// Should NOT be blocked (different action)
+	// Should NOT be blocked (allowed by Allow statement, no deny)
 	if g.isBlockedBySCP("arn:aws:iam::123456789012:user/alice", "s3:GetObject", "arn:aws:s3:::my-bucket", ctx) {
 		t.Error("Expected SCP to NOT block s3:GetObject")
 	}
@@ -46,6 +51,11 @@ func TestIsBlockedBySCP_WildcardDeny(t *testing.T) {
 			Version: "2012-10-17",
 			Statements: []types.Statement{
 				{
+					Effect:   types.EffectAllow,
+					Action:   "*",
+					Resource: "*",
+				},
+				{
 					Effect:   types.EffectDeny,
 					Action:   "s3:*",
 					Resource: "*",
@@ -56,7 +66,7 @@ func TestIsBlockedBySCP_WildcardDeny(t *testing.T) {
 
 	ctx := conditions.NewDefaultContext()
 
-	// Should block all S3 actions
+	// Should block all S3 actions (allowed then denied)
 	if !g.isBlockedBySCP("arn:aws:iam::123456789012:user/alice", "s3:DeleteBucket", "arn:aws:s3:::my-bucket", ctx) {
 		t.Error("Expected SCP to block s3:DeleteBucket with wildcard")
 	}
@@ -65,7 +75,7 @@ func TestIsBlockedBySCP_WildcardDeny(t *testing.T) {
 		t.Error("Expected SCP to block s3:GetObject with wildcard")
 	}
 
-	// Should NOT block non-S3 actions
+	// Should NOT block non-S3 actions (allowed, no deny)
 	if g.isBlockedBySCP("arn:aws:iam::123456789012:user/alice", "iam:CreateUser", "*", ctx) {
 		t.Error("Expected SCP to NOT block iam:CreateUser")
 	}
@@ -122,6 +132,11 @@ func TestIsBlockedBySCP_Conditions(t *testing.T) {
 			Version: "2012-10-17",
 			Statements: []types.Statement{
 				{
+					Effect:   types.EffectAllow,
+					Action:   "*",
+					Resource: "*",
+				},
+				{
 					Effect:   types.EffectDeny,
 					Action:   "*",
 					Resource: "*",
@@ -135,7 +150,7 @@ func TestIsBlockedBySCP_Conditions(t *testing.T) {
 		},
 	}
 
-	// From office IP - should NOT be blocked
+	// From office IP - should NOT be blocked (allowed, deny doesn't match)
 	officeCtx := &conditions.EvaluationContext{
 		SourceIP: "203.0.113.50",
 	}
@@ -143,7 +158,7 @@ func TestIsBlockedBySCP_Conditions(t *testing.T) {
 		t.Error("Expected office IP to NOT be blocked")
 	}
 
-	// From home IP - should be blocked
+	// From home IP - should be blocked (allowed, but then denied by condition)
 	homeCtx := &conditions.EvaluationContext{
 		SourceIP: "192.0.2.1",
 	}
@@ -152,16 +167,16 @@ func TestIsBlockedBySCP_Conditions(t *testing.T) {
 	}
 }
 
-// TestIsBlockedBySCP_AllowStatementIgnored tests that Allow statements in SCPs are ignored
-func TestIsBlockedBySCP_AllowStatementIgnored(t *testing.T) {
+// TestIsBlockedBySCP_ImplicitDeny tests that actions not explicitly allowed are implicitly denied
+func TestIsBlockedBySCP_ImplicitDeny(t *testing.T) {
 	g := New()
 	g.scps = []types.PolicyDocument{
 		{
-			ID:      "scp-with-allow",
+			ID:      "scp-allow-s3-only",
 			Version: "2012-10-17",
 			Statements: []types.Statement{
 				{
-					Effect:   types.EffectAllow, // Allow in SCP doesn't grant access
+					Effect:   types.EffectAllow,
 					Action:   "s3:*",
 					Resource: "*",
 				},
@@ -171,9 +186,14 @@ func TestIsBlockedBySCP_AllowStatementIgnored(t *testing.T) {
 
 	ctx := conditions.NewDefaultContext()
 
-	// Allow statement should be ignored, nothing is blocked
+	// S3 actions should be allowed (explicit allow exists)
 	if g.isBlockedBySCP("arn:aws:iam::123456789012:user/alice", "s3:DeleteBucket", "arn:aws:s3:::my-bucket", ctx) {
-		t.Error("Expected Allow statement in SCP to be ignored (not block)")
+		t.Error("Expected s3:DeleteBucket to be allowed (explicit allow)")
+	}
+
+	// Non-S3 actions should be implicitly denied (no allow statement)
+	if !g.isBlockedBySCP("arn:aws:iam::123456789012:user/alice", "iam:CreateUser", "*", ctx) {
+		t.Error("Expected iam:CreateUser to be blocked (implicit deny)")
 	}
 }
 
@@ -216,12 +236,17 @@ func TestCanAccess_BlockedBySCP(t *testing.T) {
 		t.Error("Expected admin to have access without SCP")
 	}
 
-	// Add SCP that denies bucket deletion
+	// Add SCP that allows S3 but denies bucket deletion
 	g.scps = []types.PolicyDocument{
 		{
 			ID:      "scp-deny-bucket-delete",
 			Version: "2012-10-17",
 			Statements: []types.Statement{
+				{
+					Effect:   types.EffectAllow,
+					Action:   "*",
+					Resource: "*",
+				},
 				{
 					Effect:   types.EffectDeny,
 					Action:   "s3:DeleteBucket",
@@ -272,12 +297,17 @@ func TestCanAccess_MultipleSCPs(t *testing.T) {
 		}
 	}
 
-	// Add multiple SCPs
+	// Add multiple SCPs with different constraints
 	g.scps = []types.PolicyDocument{
 		{
 			ID:      "scp-deny-iam",
 			Version: "2012-10-17",
 			Statements: []types.Statement{
+				{
+					Effect:   types.EffectAllow,
+					Action:   "*",
+					Resource: "*",
+				},
 				{
 					Effect:   types.EffectDeny,
 					Action:   "iam:*",
@@ -289,6 +319,11 @@ func TestCanAccess_MultipleSCPs(t *testing.T) {
 			ID:      "scp-deny-s3-delete",
 			Version: "2012-10-17",
 			Statements: []types.Statement{
+				{
+					Effect:   types.EffectAllow,
+					Action:   "*",
+					Resource: "*",
+				},
 				{
 					Effect:   types.EffectDeny,
 					Action:   "s3:DeleteBucket",
@@ -390,12 +425,17 @@ func TestCanAccess_SCPResourcePattern(t *testing.T) {
 		}
 	}
 
-	// SCP denies access only to production buckets
+	// SCP allows S3 but denies access only to production buckets
 	g.scps = []types.PolicyDocument{
 		{
 			ID:      "scp-protect-prod",
 			Version: "2012-10-17",
 			Statements: []types.Statement{
+				{
+					Effect:   types.EffectAllow,
+					Action:   "*",
+					Resource: "*",
+				},
 				{
 					Effect:   types.EffectDeny,
 					Action:   "s3:DeleteBucket",
@@ -415,5 +455,273 @@ func TestCanAccess_SCPResourcePattern(t *testing.T) {
 	// NOT blocked for dev bucket
 	if !g.CanAccess(principal.ARN, "s3:DeleteBucket", "arn:aws:s3:::dev-data", ctx) {
 		t.Error("Expected dev bucket deletion to be allowed")
+	}
+}
+
+// TestFilterSCPsForAccount tests SCP filtering based on attachments and OU hierarchy
+func TestFilterSCPsForAccount(t *testing.T) {
+	// Test account ID
+	testAccountID := "123456789012"
+	otherAccountID := "999999999999"
+
+	// Test OU IDs
+	parentOU1 := "ou-1111-11111111"
+	parentOU2 := "ou-2222-22222222"
+	otherOU := "ou-9999-99999999"
+
+	// Sample SCPs
+	scpRoot := types.PolicyDocument{
+		ID:      "scp-root",
+		Version: "2012-10-17",
+		Statements: []types.Statement{
+			{Effect: types.EffectAllow, Action: "*", Resource: "*"},
+		},
+	}
+
+	scpAccount := types.PolicyDocument{
+		ID:      "scp-account",
+		Version: "2012-10-17",
+		Statements: []types.Statement{
+			{Effect: types.EffectDeny, Action: "iam:*", Resource: "*"},
+		},
+	}
+
+	scpOU := types.PolicyDocument{
+		ID:      "scp-ou",
+		Version: "2012-10-17",
+		Statements: []types.Statement{
+			{Effect: types.EffectDeny, Action: "s3:*", Resource: "*"},
+		},
+	}
+
+	scpMultiTarget := types.PolicyDocument{
+		ID:      "scp-multi",
+		Version: "2012-10-17",
+		Statements: []types.Statement{
+			{Effect: types.EffectDeny, Action: "ec2:*", Resource: "*"},
+		},
+	}
+
+	tests := []struct {
+		name        string
+		accountID   string
+		attachments []types.SCPAttachment
+		ouHierarchy *types.OUHierarchy
+		wantCount   int
+		wantIDs     []string
+	}{
+		{
+			name:      "ROOT target applies to all accounts",
+			accountID: testAccountID,
+			attachments: []types.SCPAttachment{
+				{
+					Policy: scpRoot,
+					Targets: []types.SCPTarget{
+						{Type: types.SCPTargetTypeRoot, ID: "r-1111"},
+					},
+				},
+			},
+			ouHierarchy: nil,
+			wantCount:   1,
+			wantIDs:     []string{"scp-root"},
+		},
+		{
+			name:      "ACCOUNT target matches specific account",
+			accountID: testAccountID,
+			attachments: []types.SCPAttachment{
+				{
+					Policy: scpAccount,
+					Targets: []types.SCPTarget{
+						{Type: types.SCPTargetTypeAccount, ID: testAccountID},
+					},
+				},
+			},
+			ouHierarchy: nil,
+			wantCount:   1,
+			wantIDs:     []string{"scp-account"},
+		},
+		{
+			name:      "ACCOUNT target doesn't match different account",
+			accountID: testAccountID,
+			attachments: []types.SCPAttachment{
+				{
+					Policy: scpAccount,
+					Targets: []types.SCPTarget{
+						{Type: types.SCPTargetTypeAccount, ID: otherAccountID},
+					},
+				},
+			},
+			ouHierarchy: nil,
+			wantCount:   0,
+			wantIDs:     []string{},
+		},
+		{
+			name:      "ORGANIZATIONAL_UNIT with hierarchy - OU in hierarchy",
+			accountID: testAccountID,
+			attachments: []types.SCPAttachment{
+				{
+					Policy: scpOU,
+					Targets: []types.SCPTarget{
+						{Type: types.SCPTargetTypeOrganizationalUnit, ID: parentOU1},
+					},
+				},
+			},
+			ouHierarchy: &types.OUHierarchy{
+				AccountID: testAccountID,
+				ParentOUs: []string{parentOU1, parentOU2},
+			},
+			wantCount: 1,
+			wantIDs:   []string{"scp-ou"},
+		},
+		{
+			name:      "ORGANIZATIONAL_UNIT with hierarchy - OU not in hierarchy",
+			accountID: testAccountID,
+			attachments: []types.SCPAttachment{
+				{
+					Policy: scpOU,
+					Targets: []types.SCPTarget{
+						{Type: types.SCPTargetTypeOrganizationalUnit, ID: otherOU},
+					},
+				},
+			},
+			ouHierarchy: &types.OUHierarchy{
+				AccountID: testAccountID,
+				ParentOUs: []string{parentOU1, parentOU2},
+			},
+			wantCount: 0,
+			wantIDs:   []string{},
+		},
+		{
+			name:      "ORGANIZATIONAL_UNIT without hierarchy - conservative fallback",
+			accountID: testAccountID,
+			attachments: []types.SCPAttachment{
+				{
+					Policy: scpOU,
+					Targets: []types.SCPTarget{
+						{Type: types.SCPTargetTypeOrganizationalUnit, ID: otherOU},
+					},
+				},
+			},
+			ouHierarchy: nil, // No hierarchy available
+			wantCount:   1,   // Conservatively include it
+			wantIDs:     []string{"scp-ou"},
+		},
+		{
+			name:      "Multiple targets per SCP - one matches",
+			accountID: testAccountID,
+			attachments: []types.SCPAttachment{
+				{
+					Policy: scpMultiTarget,
+					Targets: []types.SCPTarget{
+						{Type: types.SCPTargetTypeAccount, ID: otherAccountID}, // Doesn't match
+						{Type: types.SCPTargetTypeAccount, ID: testAccountID},  // Matches
+					},
+				},
+			},
+			ouHierarchy: nil,
+			wantCount:   1,
+			wantIDs:     []string{"scp-multi"},
+		},
+		{
+			name:      "Multiple attachments - mixed matching",
+			accountID: testAccountID,
+			attachments: []types.SCPAttachment{
+				{
+					Policy: scpRoot,
+					Targets: []types.SCPTarget{
+						{Type: types.SCPTargetTypeRoot, ID: "r-1111"},
+					},
+				},
+				{
+					Policy: scpAccount,
+					Targets: []types.SCPTarget{
+						{Type: types.SCPTargetTypeAccount, ID: testAccountID},
+					},
+				},
+				{
+					Policy: scpOU,
+					Targets: []types.SCPTarget{
+						{Type: types.SCPTargetTypeAccount, ID: otherAccountID}, // Doesn't match
+					},
+				},
+			},
+			ouHierarchy: nil,
+			wantCount:   2,
+			wantIDs:     []string{"scp-root", "scp-account"},
+		},
+		{
+			name:        "No attachments returns empty list",
+			accountID:   testAccountID,
+			attachments: []types.SCPAttachment{},
+			ouHierarchy: nil,
+			wantCount:   0,
+			wantIDs:     []string{},
+		},
+		{
+			name:      "Complex hierarchy with multiple OUs",
+			accountID: testAccountID,
+			attachments: []types.SCPAttachment{
+				{
+					Policy: scpRoot,
+					Targets: []types.SCPTarget{
+						{Type: types.SCPTargetTypeRoot, ID: "r-1111"},
+					},
+				},
+				{
+					Policy: scpOU,
+					Targets: []types.SCPTarget{
+						{Type: types.SCPTargetTypeOrganizationalUnit, ID: parentOU2},
+					},
+				},
+				{
+					Policy: scpAccount,
+					Targets: []types.SCPTarget{
+						{Type: types.SCPTargetTypeOrganizationalUnit, ID: otherOU},
+					},
+				},
+			},
+			ouHierarchy: &types.OUHierarchy{
+				AccountID: testAccountID,
+				ParentOUs: []string{parentOU1, parentOU2},
+			},
+			wantCount: 2,
+			wantIDs:   []string{"scp-root", "scp-ou"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := filterSCPsForAccount(tt.accountID, tt.attachments, tt.ouHierarchy)
+
+			if len(result) != tt.wantCount {
+				t.Errorf("filterSCPsForAccount() returned %d SCPs, want %d", len(result), tt.wantCount)
+			}
+
+			// Verify the correct SCPs were included
+			resultIDs := make(map[string]bool)
+			for _, scp := range result {
+				resultIDs[scp.ID] = true
+			}
+
+			for _, wantID := range tt.wantIDs {
+				if !resultIDs[wantID] {
+					t.Errorf("Expected SCP %q to be included, but it wasn't", wantID)
+				}
+			}
+
+			// Verify no unexpected SCPs were included
+			for resultID := range resultIDs {
+				found := false
+				for _, wantID := range tt.wantIDs {
+					if resultID == wantID {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Unexpected SCP %q was included", resultID)
+				}
+			}
+		})
 	}
 }
