@@ -58,12 +58,10 @@ aws-access-map collect --all-accounts
 
 ## Installation
 
-### From Source
+### Homebrew (macOS/Linux) - Recommended
 ```bash
-git clone https://github.com/pfrederiksen/aws-access-map
-cd aws-access-map
-make build
-./build/aws-access-map --help
+brew tap pfrederiksen/tap
+brew install aws-access-map
 ```
 
 ### Go Install
@@ -72,7 +70,15 @@ go install github.com/pfrederiksen/aws-access-map/cmd/aws-access-map@latest
 ```
 
 ### Pre-built Binaries
-Download from [releases](https://github.com/pfrederiksen/aws-access-map/releases) (coming soon).
+Download from [releases](https://github.com/pfrederiksen/aws-access-map/releases).
+
+### From Source
+```bash
+git clone https://github.com/pfrederiksen/aws-access-map
+cd aws-access-map
+make build
+./build/aws-access-map --help
+```
 
 ## Quick Start
 

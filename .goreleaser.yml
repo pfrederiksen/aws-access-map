@@ -72,6 +72,20 @@ changelog:
     - title: 'Other Changes'
       order: 999
 
+brews:
+  - repository:
+      owner: pfrederiksen
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/pfrederiksen/aws-access-map"
+    description: "Instant 'who can reach this?' mapping for AWS resources"
+    license: "MIT"
+    test: |
+      system "#{bin}/aws-access-map --version"
+    install: |
+      bin.install "aws-access-map"
+
 release:
   github:
     owner: pfrederiksen
@@ -84,7 +98,7 @@ release:
 
     **macOS (Homebrew):**
     ```bash
-    brew tap pfrederiksen/aws-access-map
+    brew tap pfrederiksen/tap
     brew install aws-access-map
     ```
 
